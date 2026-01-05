@@ -1,0 +1,16 @@
+addon: true
+version: 0.1.0
+class: custom
+description: 'Custom Identity Service'
+dependencies:
+  - frigate
+start:
+  - python3 -m http.server 8000  # Simple HTTP server for serving the files
+stop:
+  - killall python3
+mqtt:
+  sensor:
+    - name: "Last Person Recognized (Face)"
+      state_topic: "identity/person/recognized"
+      value_template: "{{ value_json.person_id }}"
+      json_attributes_topic: "identity/person
