@@ -8,6 +8,7 @@ This publishes mock face and person detection events to your MQTT broker.
 Monitor the identity_service.py output to see if matching is working.
 """
 
+import os
 import paho.mqtt.client as mqtt
 import json
 import time
@@ -64,12 +65,15 @@ def publish_person_event(client, camera, color='red'):
     print(f"Published PERSON event: {camera}")
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT broker (code: {rc})")
 
 
-def on_disconnect(client, userdata, rc):
-    if rc != 0:
+def on_disconnect(client, userdata, *args):
+    rc = None
+    if len(args) >= 1:
+        rc = args[0]
+    if rc is not None and rc != 0:
         print(f"Unexpected disconnection (code: {rc})")
 
 
@@ -77,14 +81,21 @@ def main():
     parser = argparse.ArgumentParser(description='Publish mock Frigate MQTT events')
     parser.add_argument('--broker', default='localhost', help='MQTT broker address')
     parser.add_argument('--port', type=int, default=1883, help='MQTT broker port')
+    parser.add_argument('--username', help='MQTT username (or set MQTT_USERNAME env)')
+    parser.add_argument('--password', help='MQTT password (or set MQTT_PASSWORD env)')
     parser.add_argument('--test', choices=['basic', 'multiface', 'reid'], default='basic',
                        help='Test scenario to run')
     
     args = parser.parse_args()
     
-    client = mqtt.Client()
+    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
+    # Determine credentials: CLI args take precedence, then environment variables
+    mqtt_user = args.username if args.username else os.getenv("MQTT_USERNAME")
+    mqtt_pass = args.password if args.password else os.getenv("MQTT_PASSWORD")
+    if mqtt_user:
+        client.username_pw_set(mqtt_user, mqtt_pass)
     
     try:
         print(f"Connecting to {args.broker}:{args.port}...")

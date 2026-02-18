@@ -11,6 +11,8 @@ from matcher import EmbeddingMatcher
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
@@ -39,7 +41,7 @@ person_tracking = defaultdict(lambda: {
     "confidence": 0
 })
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
     client.subscribe("frigate/events")
 
@@ -115,18 +117,20 @@ def on_message(client, userdata, msg):
                 
                 # If we found a match, propagate the identity
                 if matched_person:
+                    # Ensure numeric types are JSON-serializable (convert numpy.float32 etc. to native Python float)
+                    score = float(similarity_score)
                     identity_event = {
                         "person_id": matched_person,
-                        "confidence": similarity_score,
+                        "confidence": score,
                         "camera": camera,
-                        "timestamp": timestamp,
+                        "timestamp": int(timestamp) if timestamp is not None else None,
                         "frigate_event_id": event_id,
                         "source": "reid_model",
-                        "similarity_score": float(similarity_score)
+                        "similarity_score": score
                     }
-                    
+
                     client.publish("identity/person/tracked", json.dumps(identity_event))
-                    print(f"[REID] {matched_person} tracked at {camera} (similarity: {similarity_score:.4f})")
+                    print(f"[REID] {matched_person} tracked at {camera} (similarity: {score:.4f})")
                 else:
                     # No match found - this might be a new person or a low-confidence match
                     print(f"[REID] No person match found at {camera} (best similarity was {similarity_score:.4f})")
@@ -139,11 +143,15 @@ def on_message(client, userdata, msg):
         print(f"Error processing MQTT message: {e}")
         traceback.print_exc()
 
-client = mqtt.Client()
+client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
 client.on_message = on_message
 
 try:
+    # If username is provided, configure credentials
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     client.loop_forever()
 except Exception as e:
