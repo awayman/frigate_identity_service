@@ -52,39 +52,18 @@ docker run --env MQTT_BROKER=host.docker.internal --env MQTT_PORT=1883 frigate-i
 **Next steps**
 - Add `camera_topology.yaml` for spatial matching and persist tracked identities between restarts.
 
-**Home Assistant Add-on**
+**Home Assistant Integration**
 
-This repository can be used as a Home Assistant add-on. A minimal add-on manifest is included in `config.json`.
+The Home Assistant integration has been moved to a separate repository for HACS compatibility:
 
-Install / build instructions:
+📦 **[Frigate Identity HA](https://github.com/awayman/frigate-identity-ha)**
 
-- Place this repository in your Home Assistant add-ons folder (e.g., `/addons/local/frigate_identity_service`) or use the Supervisor "Add-on store -> Repositories" method.
-- Configure add-on options in the Supervisor UI, or set `mqtt_broker` / `mqtt_port` in the add-on configuration.
-- The add-on uses host networking by default (`host_network: true`) so it can reach your MQTT broker on the host.
+This repository contains:
+- The core Frigate Identity Service (this repo)
+- Standalone deployment via Docker or Python
+- Home Assistant Add-on manifest for deployment as a Home Assistant add-on
 
-Example add-on options (Supervisor UI):
-
-```json
-{
-	"mqtt_broker": "core-mosquitto",
-	"mqtt_port": 1883
-}
-```
-
-When running as an add-on, Home Assistant Supervisor will set environment variables from the add-on options. The service reads `MQTT_BROKER` and `MQTT_PORT` from the environment; the add-on manifest maps the `mqtt_broker` option into the container environment at runtime.
-
-If you want me to convert this into a more complete add-on (web UI, health checks, validated options schema, multi-arch build), tell me which features to prioritize.
-
-**HACS (Custom Integration) Install**
-
-This repository also includes a minimal HACS-compatible custom integration scaffold under `custom_components/frigate_identity`.
-
-To install via HACS (Community Store):
-
-1. In HACS, go to "Settings -> Custom repositories" and add this repository URL as a "Integration".
-2. Install "Frigate Identity" from HACS and restart Home Assistant.
-3. The integration is minimal and depends on the `mqtt` integration; enable/configure the add-on or ensure your MQTT broker is reachable.
-
-After installation you can configure the add-on (if used) and enable the integration from Settings → Devices & Services.
-
-If you'd like, I can expand the custom integration to expose entities (sensors/switches), provide services for manual re-id propagation, or integrate with the add-on to control lifecycle.
+For Home Assistant integration, see the separate repository above for:
+- HACS installation instructions
+- Home Assistant custom component setup
+- Integration configuration and sensors
