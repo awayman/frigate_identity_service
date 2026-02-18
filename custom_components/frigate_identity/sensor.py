@@ -45,6 +45,7 @@ class FrigateIdentitySensor(SensorEntity):
 
             person = payload.get("person_id") or payload.get("person") or payload.get("name")
             confidence = payload.get("confidence")
+            similarity_score = payload.get("similarity_score")
             camera = payload.get("camera") or payload.get("checkpoint")
             timestamp = payload.get("timestamp")
             source = payload.get("source")
@@ -56,6 +57,11 @@ class FrigateIdentitySensor(SensorEntity):
                 "timestamp": timestamp,
                 "source": source,
             }
+            
+            # Add similarity score if present (from re-id model)
+            if similarity_score is not None:
+                self._attrs["similarity_score"] = similarity_score
+            
             self.async_write_ha_state()
 
         # subscribe to both recognized and tracked topics

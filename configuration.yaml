@@ -1,11 +1,11 @@
 addon: true
 version: 0.1.0
 class: custom
-description: 'Custom Identity Service'
+description: 'Custom Identity Service with Deep Learning Person Re-ID'
 dependencies:
   - frigate
 start:
-  - python3 -m http.server 8000  # Simple HTTP server for serving the files
+  - python3 identity_service.py
 stop:
   - killall python3
 mqtt:
@@ -13,4 +13,22 @@ mqtt:
     - name: "Last Person Recognized (Face)"
       state_topic: "identity/person/recognized"
       value_template: "{{ value_json.person_id }}"
-      json_attributes_topic: "identity/person
+      json_attributes_topic: "identity/person/recognized"
+    - name: "Last Person Tracked (Re-ID)"
+      state_topic: "identity/person/tracked"
+      value_template: "{{ value_json.person_id }}"
+      json_attributes_topic: "identity/person/tracked"
+environment:
+  MQTT_BROKER: "localhost"
+  MQTT_PORT: "1883"
+  REID_MODEL: "osnet_x1_0"
+  REID_DEVICE: "auto"
+  REID_SIMILARITY_THRESHOLD: "0.6"
+  EMBEDDINGS_DB_PATH: "/data/embeddings.json"
+options:
+  mqtt_broker: "localhost"
+  mqtt_port: 1883
+  reid_model: "osnet_x1_0"
+  reid_device: "auto"
+  reid_similarity_threshold: 0.6
+  embeddings_db_path: "/data/embeddings.json"
