@@ -39,6 +39,9 @@ class MQTTConnectionManager:
     - Status callbacks for disconnect/reconnect events
     """
     
+    # Queue warning threshold (warn when queue is 90% full)
+    QUEUE_WARNING_THRESHOLD = 0.9
+    
     def __init__(self, client, initial_delay=1, max_delay=60, max_queue_size=100, max_retries=-1):
         """
         Initialize MQTT connection manager.
@@ -150,7 +153,7 @@ class MQTTConnectionManager:
             self.message_queue.append(message)
             
             # Log if queue is getting full
-            if len(self.message_queue) >= self.max_queue_size * 0.9:
+            if len(self.message_queue) >= self.max_queue_size * self.QUEUE_WARNING_THRESHOLD:
                 print(f"[MQTT] Warning: Message queue is {len(self.message_queue)}/{self.max_queue_size}")
     
     def _republish_queued_messages(self):

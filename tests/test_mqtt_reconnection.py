@@ -44,7 +44,7 @@ class TestMQTTConnectionManager:
         assert connection_manager.max_delay == 60
         assert connection_manager.max_queue_size == 100
         assert connection_manager.reconnect_count == 0
-        assert connection_manager.is_connected == False
+        assert not connection_manager.is_connected
         assert len(connection_manager.message_queue) == 0
         
         # Verify reconnect_delay_set was called
@@ -75,7 +75,7 @@ class TestMQTTConnectionManager:
         result = connection_manager.publish_or_queue("test/topic", "test payload", qos=1, retain=False)
         
         # Should return False (message was queued, not published)
-        assert result == False
+        assert not result
         
         # Verify message is in queue
         assert len(connection_manager.message_queue) == 1
@@ -92,7 +92,7 @@ class TestMQTTConnectionManager:
         result = connection_manager.publish_or_queue("test/topic", "test payload")
         
         # Should return True (message was published)
-        assert result == True
+        assert result
         
         # Verify publish was called
         mock_client.publish.assert_called_once_with("test/topic", "test payload", 0, False)

@@ -25,6 +25,8 @@ SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
 RECONNECT_INITIAL_DELAY = int(os.getenv("RECONNECT_INITIAL_DELAY", "1"))
 MAX_RECONNECT_DELAY = int(os.getenv("MAX_RECONNECT_DELAY", "60"))
+API_RETRY_DELAY = float(os.getenv("API_RETRY_DELAY", "0.5"))
+API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -115,7 +117,7 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
     """
     Fetch snapshot from Frigate API for a specific event.
     Uses caching to avoid redundant API calls.
-    Retries up to 3 times on failure with 0.5s delay between retries.
+    Retries up to API_MAX_RETRIES times on failure with API_RETRY_DELAY between retries.
     
     Returns: base64-encoded JPEG string, or None if failed
     """
@@ -128,8 +130,8 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
             return cached_img
     
     # Retry configuration
-    max_retries = 3
-    retry_delay = 0.5  # seconds
+    max_retries = API_MAX_RETRIES
+    retry_delay = API_RETRY_DELAY
     
     for attempt in range(max_retries):
         try:
