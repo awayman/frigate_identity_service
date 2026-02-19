@@ -114,11 +114,11 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Authentication/authorization for API access
 
 ### MQTT Reconnection & Error Recovery
-- [ ] Automatic reconnection on disconnect
-- [ ] Exponential backoff retry logic
-- [ ] Queue messages during disconnection
-- [ ] Republish queued messages on reconnect
-- [ ] Frigate API retry logic with backoff
+- [x] Automatic reconnection on disconnect
+- [x] Exponential backoff retry logic
+- [x] Queue messages during disconnection
+- [x] Republish queued messages on reconnect
+- [x] Frigate API retry logic with backoff
 - [ ] Health monitoring and alerting
 - [ ] Graceful degradation when Frigate unavailable
 
