@@ -1,9 +1,11 @@
 import paho.mqtt.client as mqtt
 import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 import os
 import traceback
+import requests
+import base64
 
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
@@ -13,10 +15,13 @@ MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
+SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
+MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -34,114 +39,272 @@ except RuntimeError as e:
     reid_model = None
     REID_AVAILABLE = False
 
-# Track known persons and their last seen location/time
-person_tracking = defaultdict(lambda: {
-    "last_camera": None,
-    "last_timestamp": None,
-    "confidence": 0
-})
+# Track recent person detections per camera for snapshot correlation
+camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_CAMERA))
+
+# Cache snapshots to avoid redundant API calls
+snapshot_cache = {}  # event_id -> (base64_image, timestamp)
+CACHE_TTL = 60  # seconds
 
 def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
-    client.subscribe("frigate/events")
+    print(f"Frigate API endpoint: {FRIGATE_HOST}")
+    
+    # Subscribe to tracked object updates (includes face recognition via sub_label)
+    client.subscribe("frigate/+/+/update")
+    print("Subscribed to: frigate/+/+/update")
+    
+    # Subscribe to person snapshots for fast display
+    client.subscribe("frigate/+/person/snapshot")
+    print("Subscribed to: frigate/+/person/snapshot")
+    
+    # Optional: Subscribe to car/truck for vehicle detection
+    client.subscribe("frigate/+/car/snapshot")
+    client.subscribe("frigate/+/truck/snapshot")
+    print("Subscribed to vehicle snapshots")
 
 def on_message(client, userdata, msg):
+    """Route messages to appropriate handlers based on topic"""
+    try:
+        if "/update" in msg.topic:
+            handle_tracked_object_update(client, msg)
+        elif "/snapshot" in msg.topic:
+            handle_snapshot_for_display(client, msg)
+    except Exception as e:
+        print(f"Error processing MQTT message on {msg.topic}: {e}")
+        traceback.print_exc()
+
+def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
+    """
+    Fetch snapshot from Frigate API for a specific event.
+    Uses caching to avoid redundant API calls.
+    
+    Returns: base64-encoded JPEG string, or None if failed
+    """
+    now = time.time()
+    
+    # Check cache
+    if event_id in snapshot_cache:
+        cached_img, cached_time = snapshot_cache[event_id]
+        if now - cached_time < CACHE_TTL:
+            return cached_img
+    
+    try:
+        # Use thumbnail endpoint with crop parameter
+        url = f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg"
+        params = {
+            "crop": "1" if crop else "0",
+            "quality": quality,
+            "h": height
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        
+        if response.status_code == 200:
+            # Convert to base64 for ReID model
+            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            
+            # Cache the result
+            snapshot_cache[event_id] = (image_base64, now)
+            
+            return image_base64
+        else:
+            print(f"[API] Failed to fetch snapshot for {event_id}: HTTP {response.status_code}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"[API] Error fetching snapshot for {event_id}: {e}")
+        return None
+
+def publish_identity_event(client, person_id, camera, confidence, source, zones, event_id, timestamp):
+    """Publish identity event to Home Assistant"""
+    identity_event = {
+        "person_id": person_id,
+        "camera": camera,
+        "confidence": float(confidence),
+        "source": source,
+        "frigate_zones": zones,
+        "event_id": event_id,
+        "timestamp": int(timestamp * 1000) if isinstance(timestamp, float) else timestamp,
+        "snapshot_url": f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg?crop=1"
+    }
+    
+    # Publish to person-specific topic
+    client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
+    print(f"[{source.upper()}] {person_id} at {camera} (zones: {zones}, confidence: {confidence:.3f})")
+
+def handle_tracked_object_update(client, msg):
+    """
+    Process Frigate tracked object update.
+    Builds correlation data for snapshot matching and fetches accurate embeddings via API.
+    """
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        print(f"[UPDATE] Warning: Could not decode JSON from {msg.topic}")
+        return
+    
+    camera = payload.get("camera")
+    event_id = payload.get("id")
+    label = payload.get("label")
+    sub_label = payload.get("sub_label")  # Face recognition result from Frigate
+    current_zones = payload.get("current_zones", [])
+    confidence = payload.get("top_score", payload.get("score", 0))
+    timestamp = payload.get("frame_time", time.time())
+    
+    if label != "person":
+        return  # Only process person objects
+    
+    # Add to camera tracking queue for snapshot correlation
+    detection_record = {
+        "event_id": event_id,
+        "timestamp": timestamp,
+        "zones": current_zones,
+        "confidence": confidence
+    }
+    
+    # SCENARIO A: Frigate identified face via facial recognition
+    if sub_label and sub_label != "":
+        person_id = sub_label
+        detection_record["person_id"] = person_id
         
-        # Handle face recognition events
-        if payload.get("type") == "face":
-            person_name = payload.get("name")
-            confidence = payload.get("score")
-            camera = payload.get("camera")
-            timestamp = payload.get("timestamp")
-            event_id = payload.get("id")
-            image_base64 = payload.get("image")  # Base64-encoded person crop
-            
-            # Store tracking information
-            person_tracking[person_name]["last_camera"] = camera
-            person_tracking[person_name]["last_timestamp"] = timestamp
-            person_tracking[person_name]["confidence"] = confidence
-            
-            # Extract and store embedding if image is provided
-            if image_base64 and REID_AVAILABLE:
-                try:
-                    embedding = reid_model.extract_embedding(image_base64)
-                    embedding_store.store_embedding(person_name, embedding, camera, confidence)
-                    print(f"[FACE] Stored embedding for {person_name} at {camera}")
-                except Exception as e:
-                    print(f"[FACE] Warning: Could not extract embedding for {person_name}: {e}")
-            
-            # Publish identity event
-            identity_event = {
-                "person_id": person_name,
-                "confidence": confidence,
-                "checkpoint": camera,
-                "timestamp": timestamp,
-                "frigate_event_id": event_id,
-                "camera": camera,
-                "source": "facial_recognition"
-            }
-            
-            client.publish("identity/person/recognized", json.dumps(identity_event))
-            print(f"[FACE] {person_name} recognized at {camera} (confidence: {confidence:.2f})")
+        # Add to correlation queue
+        camera_person_queue[camera].append(detection_record)
         
-        # Handle person detection events without facial recognition
-        elif payload.get("type") == "person":
-            camera = payload.get("camera")
-            timestamp = payload.get("timestamp")
-            event_id = payload.get("id")
-            image_base64 = payload.get("image")  # Base64-encoded person crop
-            
-            if not REID_AVAILABLE:
-                print(f"[REID] ReID model not available, skipping re-identification at {camera}")
-                return
-            
-            if not image_base64:
-                print(f"[REID] Warning: Person detection event has no image, skipping re-id")
-                return
-            
+        # ACCURATE PATH: Fetch via API for embedding storage
+        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
+        
+        if snapshot_base64 and REID_AVAILABLE:
             try:
-                # Extract embedding from the person crop
-                query_embedding = reid_model.extract_embedding(image_base64)
-                
-                # Get all stored embeddings
-                stored_embeddings = embedding_store.get_all_embeddings()
-                
-                # Find best match
-                matched_person, similarity_score = EmbeddingMatcher.find_best_match(
-                    query_embedding,
-                    stored_embeddings,
-                    threshold=REID_SIMILARITY_THRESHOLD
-                )
-                
-                # If we found a match, propagate the identity
-                if matched_person:
-                    # Ensure numeric types are JSON-serializable (convert numpy.float32 etc. to native Python float)
-                    score = float(similarity_score)
-                    identity_event = {
-                        "person_id": matched_person,
-                        "confidence": score,
-                        "camera": camera,
-                        "timestamp": int(timestamp) if timestamp is not None else None,
-                        "frigate_event_id": event_id,
-                        "source": "reid_model",
-                        "similarity_score": score
-                    }
-
-                    client.publish("identity/person/tracked", json.dumps(identity_event))
-                    print(f"[REID] {matched_person} tracked at {camera} (similarity: {score:.4f})")
-                else:
-                    # No match found - this might be a new person or a low-confidence match
-                    print(f"[REID] No person match found at {camera} (best similarity was {similarity_score:.4f})")
-
+                embedding = reid_model.extract_embedding(snapshot_base64)
+                embedding_store.store_embedding(person_id, embedding, camera, confidence)
+                print(f"[EMBEDDING] Stored accurate embedding for {person_id}")
             except Exception as e:
-                print(f"[REID] Error processing person detection at {camera}: {e}")
-                traceback.print_exc()
+                print(f"[EMBEDDING] Error storing embedding for {person_id}: {e}")
+        
+        # Publish identity event (HA doesn't wait for embedding storage)
+        publish_identity_event(client, person_id, camera, confidence,
+                              "facial_recognition", current_zones, event_id, timestamp)
+    
+    # SCENARIO B: Person detected but no face visible - try ReID
+    else:
+        if not REID_AVAILABLE:
+            return
+        
+        # Try ReID matching via API (accurate)
+        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
+        
+        if not snapshot_base64:
+            print(f"[REID] Could not fetch snapshot for event {event_id}")
+            return
+        
+        try:
+            # Extract embedding and match to stored persons
+            query_embedding = reid_model.extract_embedding(snapshot_base64)
+            stored_embeddings = embedding_store.get_all_embeddings()
+            person_id, similarity_score = EmbeddingMatcher.find_best_match(
+                query_embedding,
+                stored_embeddings,
+                threshold=REID_SIMILARITY_THRESHOLD
+            )
+            
+            if person_id:
+                detection_record["person_id"] = person_id
+                camera_person_queue[camera].append(detection_record)
+                
+                publish_identity_event(client, person_id, camera, similarity_score,
+                                     "reid_model", current_zones, event_id, timestamp)
+            else:
+                print(f"[REID] No match found for event {event_id} (best score: {similarity_score:.3f})")
+                
+        except Exception as e:
+            print(f"[REID] Error processing event {event_id}: {e}")
+            traceback.print_exc()
 
-    except Exception as e:
-        print(f"Error processing MQTT message: {e}")
-        traceback.print_exc()
+def handle_snapshot_for_display(client, msg):
+    """
+    FAST PATH: Match MQTT snapshot to recent person detection for live dashboard.
+    Uses temporal correlation - occasional mismatches acceptable for display.
+    """
+    # Extract camera and object type from topic: frigate/{camera}/{object_type}/snapshot
+    topic_parts = msg.topic.split("/")
+    if len(topic_parts) < 4:
+        return
+    
+    camera = topic_parts[1]
+    object_type = topic_parts[2]
+    
+    image_bytes = msg.payload
+    now = time.time()
+    
+    # Handle vehicle snapshots
+    if object_type in ["car", "truck"]:
+        # Publish vehicle detection event
+        vehicle_event = {
+            "vehicle_type": object_type,
+            "camera": camera,
+            "timestamp": int(now * 1000)
+        }
+        client.publish("identity/vehicle/detected", json.dumps(vehicle_event))
+        
+        # Store snapshot for HA display
+        client.publish(f"identity/snapshots/vehicle_{camera}", image_bytes, retain=True)
+        print(f"[VEHICLE] {object_type} detected at {camera}")
+        return
+    
+    # Handle person snapshots
+    if object_type != "person":
+        return
+    
+    # Get recent person detections on this camera
+    recent_detections = camera_person_queue.get(camera, deque())
+    
+    if not recent_detections:
+        print(f"[SNAPSHOT] Received snapshot from {camera}, but no recent person detection")
+        return
+    
+    # Match to most recent person within correlation window
+    matched_person = None
+    active_persons = []
+    
+    for detection in reversed(recent_detections):  # Most recent first
+        if now - detection["timestamp"] <= SNAPSHOT_CORRELATION_WINDOW:
+            if "person_id" in detection:
+                active_persons.append(detection)
+                if matched_person is None:
+                    matched_person = detection
+    
+    if not matched_person or "person_id" not in matched_person:
+        print(f"[SNAPSHOT] No correlation match found for {camera} snapshot")
+        return
+    
+    person_id = matched_person["person_id"]
+    
+    # Determine correlation confidence
+    if len(active_persons) == 1:
+        confidence_note = "high_confidence"
+    elif len(active_persons) > 1:
+        confidence_note = "low_confidence_multi_person"
+        print(f"[SNAPSHOT] Warning: {len(active_persons)} persons active on {camera}, snapshot may be mismatched")
+    else:
+        confidence_note = "unknown"
+    
+    # FAST PUBLISH: Send snapshot directly to HA for dashboard
+    client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+    
+    # Update snapshot metadata
+    snapshot_metadata = {
+        "person_id": person_id,
+        "camera": camera,
+        "timestamp": int(now * 1000),
+        "source": "mqtt_snapshot",
+        "correlation_confidence": confidence_note,
+        "active_persons_count": len(active_persons),
+        "zones": matched_person.get("zones", [])
+    }
+    client.publish(f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata))
+    
+    print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})")
 
 client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
