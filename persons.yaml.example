@@ -1,0 +1,40 @@
+# Person Configuration File
+# This file defines person-specific attributes used by the Identity Service
+# for enhanced safety monitoring and role-based logic.
+
+# Example person entries:
+# Each person_id should match the person names configured in Frigate
+
+alice:
+  name: "Alice"
+  display_name: "Alice Johnson"
+  role: "child"
+  age: 7
+  supervision_required: true
+  danger_zones:
+    - "pool"
+    - "driveway"
+
+bob:
+  name: "Bob"
+  display_name: "Bob Johnson"
+  role: "adult"
+  age: 35
+  supervision_required: false
+
+charlie:
+  name: "Charlie"
+  display_name: "Charlie Johnson"
+  role: "child"
+  age: 10
+  supervision_required: true
+  danger_zones:
+    - "pool"
+
+# Field Descriptions:
+# - name: Simple name for the person (required if display_name not provided)
+# - display_name: Full display name (optional, defaults to name)
+# - role: Person's role - one of: child, adult, unknown (optional)
+# - age: Person's age in years (optional, must be positive integer)
+# - supervision_required: Whether this person requires adult supervision (optional, boolean)
+# - danger_zones: List of zone names that are dangerous for this person (optional)
