@@ -147,7 +147,7 @@ class TestCalculateEffectiveConfidence:
             base_confidence,
             last_seen,
             decay_start_minutes=5.0,
-            decay_rate_per_minute=0.20  # Would decay -0.90 total
+            decay_rate_per_minute=0.20  # Would decay -1.40 total (7 minutes × 0.20)
         )
         
         assert effective >= 0.0
