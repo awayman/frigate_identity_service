@@ -60,12 +60,12 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Different thresholds for facial vs ReID vs continuity
 
 ### Time-Based Confidence Decay
-- [ ] Track timestamp of last detection per person
-- [ ] Reduce confidence 10% per minute after 5 minutes unseen
-- [ ] Reset to 0 after 15 minutes of no detection
-- [ ] Publish decay status in MQTT messages
+- [x] Track timestamp of last detection per person
+- [x] Reduce confidence 10% per minute after 5 minutes unseen
+- [x] Reset to 0 after 15 minutes of no detection
+- [x] Publish decay status in MQTT messages
 - [ ] Home Assistant template sensor for effective confidence
-- [ ] Configurable decay rates per person role (child vs adult)
+- [x] Configurable decay rates per person role (child vs adult)
 
 ### Door Camera Logic (Indoor/Outdoor Detection)
 - [ ] Define door cameras in configuration
@@ -275,9 +275,9 @@ Comprehensive list of discussed features and their implementation status.
 ### Phase 1: Core Stability (Next Sprint)
 1. ~~Fix MQTT client compatibility issues (CallbackAPIVersion)~~ ✅ **COMPLETED**
 2. Load and parse `persons.yaml` configuration
-3. Implement basic confidence decay (time-based)
+3. ~~Implement basic confidence decay (time-based)~~ ✅ **COMPLETED**
 4. Add MQTT reconnection logic
-5. Create unit tests for core functions
+5. ~~Create unit tests for core functions~~ ✅ **COMPLETED**
 
 ### Phase 2: Safety Enhancements (Sprint 2)
 1. Implement multi-factor confidence scoring
