@@ -23,6 +23,9 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+CONFIDENCE_DECAY_START_MINUTES = float(os.getenv("CONFIDENCE_DECAY_START_MINUTES", "5.0"))
+CONFIDENCE_DECAY_FULL_MINUTES = float(os.getenv("CONFIDENCE_DECAY_FULL_MINUTES", "15.0"))
+CONFIDENCE_DECAY_RATE_PER_MINUTE = float(os.getenv("CONFIDENCE_DECAY_RATE_PER_MINUTE", "0.10"))
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -43,9 +46,51 @@ except RuntimeError as e:
 # Track recent person detections per camera for snapshot correlation
 camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_CAMERA))
 
+# Track last-seen timestamps for confidence decay
+person_last_seen: dict[str, float] = {}  # person_id -> unix timestamp
+
 # Cache snapshots to avoid redundant API calls
 snapshot_cache = {}  # event_id -> (base64_image, timestamp)
 CACHE_TTL = 60  # seconds
+
+def calculate_effective_confidence(
+    base_confidence: float,
+    last_seen_timestamp: float | None,
+    decay_start_minutes: float = 5.0,
+    decay_rate_per_minute: float = 0.10,
+    full_decay_minutes: float = 15.0,
+) -> tuple[float, float]:
+    """
+    Calculate effective confidence with time-based decay.
+    
+    Returns (effective_confidence, minutes_since_seen).
+    - No decay until decay_start_minutes
+    - Decay by decay_rate_per_minute for each minute after that
+    - Returns 0.0 after full_decay_minutes
+    - Returns base_confidence unchanged if last_seen_timestamp is None (fresh detection)
+    """
+    # Fresh detection - no previous timestamp
+    if last_seen_timestamp is None:
+        return base_confidence, 0.0
+    
+    # Calculate time elapsed
+    current_time = time.time()
+    minutes_since_seen = (current_time - last_seen_timestamp) / 60.0
+    
+    # Full decay reached
+    if minutes_since_seen >= full_decay_minutes:
+        return 0.0, minutes_since_seen
+    
+    # No decay yet
+    if minutes_since_seen <= decay_start_minutes:
+        return base_confidence, minutes_since_seen
+    
+    # Linear decay phase
+    minutes_in_decay = minutes_since_seen - decay_start_minutes
+    decay_amount = minutes_in_decay * decay_rate_per_minute
+    effective_confidence = max(0.0, base_confidence - decay_amount)
+    
+    return effective_confidence, minutes_since_seen
 
 def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
@@ -119,10 +164,25 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
 
 def publish_identity_event(client, person_id, camera, confidence, source, zones, event_id, timestamp):
     """Publish identity event to Home Assistant"""
+    # Calculate effective confidence with decay
+    last_seen = person_last_seen.get(person_id)
+    effective_confidence, minutes_since_seen = calculate_effective_confidence(
+        confidence,
+        last_seen,
+        decay_start_minutes=CONFIDENCE_DECAY_START_MINUTES,
+        decay_rate_per_minute=CONFIDENCE_DECAY_RATE_PER_MINUTE,
+        full_decay_minutes=CONFIDENCE_DECAY_FULL_MINUTES,
+    )
+    confidence_decayed = effective_confidence < confidence
+    
     identity_event = {
         "person_id": person_id,
         "camera": camera,
         "confidence": float(confidence),
+        "effective_confidence": float(effective_confidence),
+        "last_seen": last_seen if last_seen is not None else timestamp,
+        "minutes_since_seen": float(minutes_since_seen),
+        "confidence_decayed": confidence_decayed,
         "source": source,
         "frigate_zones": zones,
         "event_id": event_id,
@@ -132,7 +192,7 @@ def publish_identity_event(client, person_id, camera, confidence, source, zones,
     
     # Publish to person-specific topic
     client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
-    print(f"[{source.upper()}] {person_id} at {camera} (zones: {zones}, confidence: {confidence:.3f})")
+    print(f"[{source.upper()}] {person_id} at {camera} (zones: {zones}, confidence: {confidence:.3f}, effective: {effective_confidence:.3f})")
 
 def handle_tracked_object_update(client, msg):
     """
@@ -183,6 +243,9 @@ def handle_tracked_object_update(client, msg):
             except Exception as e:
                 print(f"[EMBEDDING] Error storing embedding for {person_id}: {e}")
         
+        # Update last-seen timestamp
+        person_last_seen[person_id] = timestamp
+        
         # Publish identity event (HA doesn't wait for embedding storage)
         publish_identity_event(client, person_id, camera, confidence,
                               "facial_recognition", current_zones, event_id, timestamp)
@@ -212,6 +275,9 @@ def handle_tracked_object_update(client, msg):
             if person_id:
                 detection_record["person_id"] = person_id
                 camera_person_queue[camera].append(detection_record)
+                
+                # Update last-seen timestamp
+                person_last_seen[person_id] = timestamp
                 
                 publish_identity_event(client, person_id, camera, similarity_score,
                                      "reid_model", current_zones, event_id, timestamp)
