@@ -23,6 +23,8 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+SPATIAL_CORRELATION_WEIGHT = float(os.getenv("SPATIAL_CORRELATION_WEIGHT", "0.4"))
+TEMPORAL_CORRELATION_WEIGHT = float(os.getenv("TEMPORAL_CORRELATION_WEIGHT", "0.6"))
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -46,6 +48,106 @@ camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_C
 # Cache snapshots to avoid redundant API calls
 snapshot_cache = {}  # event_id -> (base64_image, timestamp)
 CACHE_TTL = 60  # seconds
+
+# ===========================
+# Spatial Correlation Utilities
+# ===========================
+
+def calculate_iou(box_a: list, box_b: list) -> float:
+    """
+    Calculate Intersection over Union for two bounding boxes.
+    
+    Each box is [x_min, y_min, x_max, y_max] in pixel coordinates (Frigate format).
+    
+    Args:
+        box_a: First bounding box as [x_min, y_min, x_max, y_max]
+        box_b: Second bounding box as [x_min, y_min, x_max, y_max]
+    
+    Returns:
+        Float in [0.0, 1.0] representing IoU score. Returns 0.0 if either box is None or invalid.
+    """
+    # Handle None or invalid inputs
+    if not box_a or not box_b:
+        return 0.0
+    
+    if len(box_a) != 4 or len(box_b) != 4:
+        return 0.0
+    
+    try:
+        # Extract coordinates
+        x1_a, y1_a, x2_a, y2_a = box_a
+        x1_b, y1_b, x2_b, y2_b = box_b
+        
+        # Calculate intersection area
+        x1_inter = max(x1_a, x1_b)
+        y1_inter = max(y1_a, y1_b)
+        x2_inter = min(x2_a, x2_b)
+        y2_inter = min(y2_a, y2_b)
+        
+        # Check if there's no intersection
+        if x2_inter < x1_inter or y2_inter < y1_inter:
+            return 0.0
+        
+        intersection_area = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+        
+        # Calculate union area
+        area_a = (x2_a - x1_a) * (y2_a - y1_a)
+        area_b = (x2_b - x1_b) * (y2_b - y1_b)
+        union_area = area_a + area_b - intersection_area
+        
+        # Avoid division by zero
+        if union_area <= 0:
+            return 0.0
+        
+        iou = intersection_area / union_area
+        return float(max(0.0, min(1.0, iou)))  # Clamp to [0, 1]
+        
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def calculate_correlation_score(
+    temporal_delta: float,
+    iou: float,
+    temporal_weight: float = 0.6,
+    spatial_weight: float = 0.4,
+    max_temporal_window: float = 2.0,
+) -> float:
+    """
+    Calculate composite correlation score combining temporal and spatial signals.
+    
+    Args:
+        temporal_delta: Seconds between snapshot and detection event
+        iou: Bounding box IoU score [0.0, 1.0]
+        temporal_weight: Weight for temporal component (default 0.6)
+        spatial_weight: Weight for spatial component (default 0.4)
+        max_temporal_window: Maximum time window in seconds (default 2.0)
+    
+    Returns:
+        Float in [0.0, 1.0] representing composite correlation score.
+        Falls back to temporal-only score if iou == 0.0 (no box data available).
+    """
+    # Ensure weights sum to 1.0 (normalize if needed)
+    total_weight = temporal_weight + spatial_weight
+    if total_weight > 0:
+        temporal_weight = temporal_weight / total_weight
+        spatial_weight = spatial_weight / total_weight
+    else:
+        temporal_weight = 0.6
+        spatial_weight = 0.4
+    
+    # Calculate temporal score (inverse of time delta, normalized)
+    # Score decreases linearly from 1.0 at delta=0 to 0.0 at delta=max_temporal_window
+    temporal_score = max(0.0, 1.0 - (temporal_delta / max_temporal_window))
+    
+    # If no spatial data available (iou == 0.0), fall back to temporal-only
+    if iou == 0.0:
+        return temporal_score
+    
+    # Calculate composite score
+    composite_score = (temporal_weight * temporal_score) + (spatial_weight * iou)
+    
+    return float(max(0.0, min(1.0, composite_score)))  # Clamp to [0, 1]
 
 def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
@@ -153,6 +255,13 @@ def handle_tracked_object_update(client, msg):
     confidence = payload.get("top_score", payload.get("score", 0))
     timestamp = payload.get("frame_time", time.time())
     
+    # Extract bounding box from payload (if available)
+    # Frigate format: after["box"] = [x_min, y_min, x_max, y_max]
+    box = None
+    after = payload.get("after", {})
+    if after and "box" in after:
+        box = after["box"]
+    
     if label != "person":
         return  # Only process person objects
     
@@ -161,7 +270,8 @@ def handle_tracked_object_update(client, msg):
         "event_id": event_id,
         "timestamp": timestamp,
         "zones": current_zones,
-        "confidence": confidence
+        "confidence": confidence,
+        "box": box  # May be None if not available
     }
     
     # SCENARIO A: Frigate identified face via facial recognition
@@ -264,15 +374,42 @@ def handle_snapshot_for_display(client, msg):
         print(f"[SNAPSHOT] Received snapshot from {camera}, but no recent person detection")
         return
     
-    # Match to most recent person within correlation window
+    # Match to best person within correlation window using composite scoring
+    # Note: We don't have the snapshot's bounding box directly, but we can use
+    # temporal correlation alone or assume the snapshot correlates to detection boxes
     matched_person = None
+    best_score = -1.0
     active_persons = []
+    correlation_method = "temporal_only"
+    iou_score = 0.0
+    
+    # Check if we have any box data available for spatial correlation
+    has_spatial_data = any(d.get("box") is not None for d in recent_detections)
     
     for detection in reversed(recent_detections):  # Most recent first
-        if now - detection["timestamp"] <= SNAPSHOT_CORRELATION_WINDOW:
+        temporal_delta = now - detection["timestamp"]
+        
+        if temporal_delta <= SNAPSHOT_CORRELATION_WINDOW:
             if "person_id" in detection:
                 active_persons.append(detection)
-                if matched_person is None:
+                
+                # Calculate composite score
+                # Since we don't have the snapshot's box, we use temporal scoring
+                # but consider the presence of box data as a quality signal
+                detection_box = detection.get("box")
+                
+                # For now, use temporal-only scoring (spatial data will help in future
+                # when snapshot box extraction is implemented)
+                score = calculate_correlation_score(
+                    temporal_delta=temporal_delta,
+                    iou=0.0,  # No snapshot box available yet
+                    temporal_weight=TEMPORAL_CORRELATION_WEIGHT,
+                    spatial_weight=SPATIAL_CORRELATION_WEIGHT,
+                    max_temporal_window=SNAPSHOT_CORRELATION_WINDOW
+                )
+                
+                if score > best_score:
+                    best_score = score
                     matched_person = detection
     
     if not matched_person or "person_id" not in matched_person:
@@ -293,19 +430,22 @@ def handle_snapshot_for_display(client, msg):
     # FAST PUBLISH: Send snapshot directly to HA for dashboard
     client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
     
-    # Update snapshot metadata
+    # Update snapshot metadata with correlation information
     snapshot_metadata = {
         "person_id": person_id,
         "camera": camera,
         "timestamp": int(now * 1000),
         "source": "mqtt_snapshot",
         "correlation_confidence": confidence_note,
+        "correlation_method": correlation_method,
+        "correlation_score": round(best_score, 3),
+        "iou_score": round(iou_score, 3),
         "active_persons_count": len(active_persons),
         "zones": matched_person.get("zones", [])
     }
     client.publish(f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata))
     
-    print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})")
+    print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note}, score: {best_score:.3f})")
 
 client = get_mqtt_client()
 client.on_connect = on_connect
