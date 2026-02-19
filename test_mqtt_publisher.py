@@ -17,23 +17,7 @@ import argparse
 from PIL import Image
 import io
 
-
-def get_mqtt_client():
-    """
-    Create MQTT client with version-appropriate initialization.
-    Supports both paho-mqtt 1.x and 2.x for backward compatibility.
-    """
-    try:
-        # Try paho-mqtt 2.x API first
-        if hasattr(mqtt, 'CallbackAPIVersion'):
-            return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-        else:
-            # Fall back to paho-mqtt 1.x API
-            return mqtt.Client()
-    except Exception as e:
-        print(f"Warning: Error creating MQTT client: {e}")
-        # Final fallback
-        return mqtt.Client()
+from mqtt_utils import get_mqtt_client
 
 
 def create_test_image(color_name="red", width=256, height=128):

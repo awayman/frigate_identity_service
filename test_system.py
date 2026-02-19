@@ -11,27 +11,12 @@ import paho.mqtt.client as mqtt
 import requests
 from datetime import datetime
 
+from mqtt_utils import get_mqtt_client
+
 # Load environment variables
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
-
-def get_mqtt_client():
-    """
-    Create MQTT client with version-appropriate initialization.
-    Supports both paho-mqtt 1.x and 2.x for backward compatibility.
-    """
-    try:
-        # Try paho-mqtt 2.x API first
-        if hasattr(mqtt, 'CallbackAPIVersion'):
-            return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-        else:
-            # Fall back to paho-mqtt 1.x API
-            return mqtt.Client()
-    except Exception as e:
-        print(f"Warning: Error creating MQTT client: {e}")
-        # Final fallback
-        return mqtt.Client()
 
 class Colors:
     HEADER = '\033[95m'
