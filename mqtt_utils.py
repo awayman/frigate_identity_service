@@ -22,4 +22,3 @@ def get_mqtt_client():
     else:
         # Fall back to paho-mqtt 1.x API
         return mqtt.Client()
-
