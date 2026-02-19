@@ -168,9 +168,9 @@ Comprehensive list of discussed features and their implementation status.
 ### Configuration Management
 - [x] Environment variables via `.env`
 - [x] Example `persons.yaml` created
-- [ ] Load and parse `persons.yaml` in identity service
-- [ ] Validate configuration on startup
-- [ ] Watch for config file changes (hot reload)
+- [x] Load and parse `persons.yaml` in identity service
+- [x] Validate configuration on startup
+- [x] Watch for config file changes (hot reload)
 - [ ] Configuration schema validation
 - [ ] Migration tools for config updates
 - [ ] Import/export configuration
@@ -274,7 +274,7 @@ Comprehensive list of discussed features and their implementation status.
 
 ### Phase 1: Core Stability (Next Sprint)
 1. ~~Fix MQTT client compatibility issues (CallbackAPIVersion)~~ ✅ **COMPLETED**
-2. Load and parse `persons.yaml` configuration
+2. ~~Load and parse `persons.yaml` configuration~~ ✅ **COMPLETED**
 3. Implement basic confidence decay (time-based)
 4. Add MQTT reconnection logic
 5. Create unit tests for core functions
