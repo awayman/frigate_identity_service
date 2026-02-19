@@ -6,6 +6,10 @@ import os
 import traceback
 import requests
 import base64
+import yaml
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import threading
 
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
@@ -23,6 +27,142 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+PERSONS_CONFIG_PATH = os.getenv("PERSONS_CONFIG_PATH", "persons.yaml")
+
+# Global persons configuration dictionary
+persons_config = {}
+persons_config_lock = threading.Lock()
+
+def validate_persons_config(config: dict) -> bool:
+    """
+    Validate the persons configuration dictionary.
+    
+    Args:
+        config: Dictionary of person configurations keyed by person_id
+        
+    Returns:
+        True if valid (with warnings for individual entries), False if completely invalid
+    """
+    if not isinstance(config, dict):
+        print("[CONFIG] ERROR: Persons config must be a dictionary")
+        return False
+    
+    if len(config) == 0:
+        print("[CONFIG] WARNING: Persons config is empty")
+        return True
+    
+    valid_roles = ["child", "adult", "unknown"]
+    
+    for person_id, person_data in config.items():
+        if not isinstance(person_data, dict):
+            print(f"[CONFIG] WARNING: Invalid entry for {person_id}: must be a dictionary")
+            continue
+        
+        # Check for required name or display_name
+        if "name" not in person_data and "display_name" not in person_data:
+            print(f"[CONFIG] WARNING: Person {person_id} missing required 'name' or 'display_name' field")
+        
+        # Validate role if present
+        if "role" in person_data:
+            if person_data["role"] not in valid_roles:
+                print(f"[CONFIG] WARNING: Person {person_id} has invalid role '{person_data['role']}'. Must be one of: {valid_roles}")
+        
+        # Validate age if present
+        if "age" in person_data:
+            age = person_data["age"]
+            if not isinstance(age, int) or age <= 0:
+                print(f"[CONFIG] WARNING: Person {person_id} has invalid age '{age}'. Must be a positive integer")
+        
+        # Validate supervision_required if present
+        if "supervision_required" in person_data:
+            if not isinstance(person_data["supervision_required"], bool):
+                print(f"[CONFIG] WARNING: Person {person_id} has invalid supervision_required '{person_data['supervision_required']}'. Must be a boolean")
+    
+    return True
+
+def load_persons_config(config_path: str) -> dict:
+    """
+    Load and parse persons configuration from YAML file.
+    
+    Args:
+        config_path: Path to the persons.yaml file
+        
+    Returns:
+        Dictionary of person configurations, or empty dict on error
+    """
+    if not os.path.exists(config_path):
+        print(f"[CONFIG] WARNING: Persons config file not found at {config_path}")
+        return {}
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        if config is None:
+            print(f"[CONFIG] WARNING: Persons config file {config_path} is empty")
+            return {}
+        
+        if not validate_persons_config(config):
+            print(f"[CONFIG] ERROR: Invalid persons config in {config_path}")
+            return {}
+        
+        print(f"[CONFIG] Successfully loaded persons config with {len(config)} entries")
+        return config
+    
+    except yaml.YAMLError as e:
+        print(f"[CONFIG] ERROR: Failed to parse YAML in {config_path}: {e}")
+        return {}
+    except Exception as e:
+        print(f"[CONFIG] ERROR: Failed to load persons config from {config_path}: {e}")
+        return {}
+
+def reload_persons_config():
+    """Reload the persons configuration from disk."""
+    global persons_config
+    new_config = load_persons_config(PERSONS_CONFIG_PATH)
+    with persons_config_lock:
+        persons_config = new_config
+    print(f"[CONFIG] INFO: Persons config reloaded successfully")
+
+class PersonsConfigFileHandler(FileSystemEventHandler):
+    """File system event handler for watching persons config file changes."""
+    
+    def __init__(self, config_path):
+        self.config_path = os.path.abspath(config_path)
+    
+    def on_modified(self, event):
+        """Handle file modification events."""
+        if event.is_directory:
+            return
+        
+        if os.path.abspath(event.src_path) == self.config_path:
+            print(f"[CONFIG] Detected change in {self.config_path}, reloading...")
+            try:
+                reload_persons_config()
+            except Exception as e:
+                print(f"[CONFIG] ERROR: Failed to reload config after file change: {e}")
+
+def start_config_file_watcher():
+    """Start a file watcher for the persons config file."""
+    config_path = os.path.abspath(PERSONS_CONFIG_PATH)
+    
+    if not os.path.exists(config_path):
+        print(f"[CONFIG] Config file {config_path} does not exist, skipping file watcher")
+        return None
+    
+    watch_directory = os.path.dirname(config_path)
+    
+    event_handler = PersonsConfigFileHandler(config_path)
+    observer = Observer()
+    observer.schedule(event_handler, watch_directory, recursive=False)
+    # Use daemon thread so it doesn't block shutdown. This means in-flight reload
+    # operations may be lost on exit, but this is acceptable for config files.
+    # The main MQTT loop will handle graceful shutdown if needed.
+    observer.daemon = True
+    observer.start()
+    
+    print(f"[CONFIG] Started file watcher for {config_path}")
+    return observer
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -39,6 +179,13 @@ except RuntimeError as e:
     print("ReID matching will be disabled. Only basic temporal tracking will be available.")
     reid_model = None
     REID_AVAILABLE = False
+
+# Load persons configuration
+print(f"Loading persons configuration from {PERSONS_CONFIG_PATH}...")
+persons_config = load_persons_config(PERSONS_CONFIG_PATH)
+
+# Start file watcher for hot-reload
+config_watcher = start_config_file_watcher()
 
 # Track recent person detections per camera for snapshot correlation
 camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_CAMERA))
@@ -129,6 +276,30 @@ def publish_identity_event(client, person_id, camera, confidence, source, zones,
         "timestamp": int(timestamp * 1000) if isinstance(timestamp, float) else timestamp,
         "snapshot_url": f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg?crop=1"
     }
+    
+    # Add person config data if available
+    with persons_config_lock:
+        if person_id in persons_config:
+            person_data = persons_config[person_id]
+            person_config_data = {}
+            
+            # Include relevant fields from person config
+            if "display_name" in person_data:
+                person_config_data["display_name"] = person_data["display_name"]
+            elif "name" in person_data:
+                person_config_data["display_name"] = person_data["name"]
+            
+            if "role" in person_data:
+                person_config_data["role"] = person_data["role"]
+            
+            if "age" in person_data:
+                person_config_data["age"] = person_data["age"]
+            
+            if "supervision_required" in person_data:
+                person_config_data["supervision_required"] = person_data["supervision_required"]
+            
+            if person_config_data:
+                identity_event["person_config"] = person_config_data
     
     # Publish to person-specific topic
     client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
