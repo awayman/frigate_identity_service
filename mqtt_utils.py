@@ -11,15 +11,15 @@ def get_mqtt_client():
     
     Returns:
         mqtt.Client: MQTT client instance
+        
+    Raises:
+        Exception: If client creation fails
     """
-    try:
-        # Try paho-mqtt 2.x API first
-        if hasattr(mqtt, 'CallbackAPIVersion'):
-            return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-        else:
-            # Fall back to paho-mqtt 1.x API
-            return mqtt.Client()
-    except Exception as e:
-        print(f"Warning: Error creating MQTT client: {e}")
-        # Final fallback
+    # Check if paho-mqtt 2.x API is available
+    if hasattr(mqtt, 'CallbackAPIVersion'):
+        # Use paho-mqtt 2.x API
+        return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    else:
+        # Fall back to paho-mqtt 1.x API
         return mqtt.Client()
+
