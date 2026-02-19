@@ -18,6 +18,24 @@ from PIL import Image
 import io
 
 
+def get_mqtt_client():
+    """
+    Create MQTT client with version-appropriate initialization.
+    Supports both paho-mqtt 1.x and 2.x for backward compatibility.
+    """
+    try:
+        # Try paho-mqtt 2.x API first
+        if hasattr(mqtt, 'CallbackAPIVersion'):
+            return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        else:
+            # Fall back to paho-mqtt 1.x API
+            return mqtt.Client()
+    except Exception as e:
+        print(f"Warning: Error creating MQTT client: {e}")
+        # Final fallback
+        return mqtt.Client()
+
+
 def create_test_image(color_name="red", width=256, height=128):
     """Create a test person crop image."""
     colors = {
@@ -88,7 +106,7 @@ def main():
     
     args = parser.parse_args()
     
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    client = get_mqtt_client()
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     # Determine credentials: CLI args take precedence, then environment variables

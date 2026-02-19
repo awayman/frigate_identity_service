@@ -16,6 +16,23 @@ MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 
+def get_mqtt_client():
+    """
+    Create MQTT client with version-appropriate initialization.
+    Supports both paho-mqtt 1.x and 2.x for backward compatibility.
+    """
+    try:
+        # Try paho-mqtt 2.x API first
+        if hasattr(mqtt, 'CallbackAPIVersion'):
+            return mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        else:
+            # Fall back to paho-mqtt 1.x API
+            return mqtt.Client()
+    except Exception as e:
+        print(f"Warning: Error creating MQTT client: {e}")
+        # Final fallback
+        return mqtt.Client()
+
 class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -45,7 +62,7 @@ def test_mqtt_connection():
     print_header("Testing MQTT Connection")
     
     try:
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client = get_mqtt_client()
         
         connected = False
         def on_connect(client, userdata, flags, rc, properties=None):
@@ -109,7 +126,7 @@ def test_mqtt_subscriptions():
         client.subscribe("frigate/#")
     
     try:
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client = get_mqtt_client()
         client.on_connect = on_connect
         client.on_message = on_message
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
@@ -141,7 +158,7 @@ def publish_test_event():
     print_header("Publishing Test Event")
     
     try:
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client = get_mqtt_client()
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         
         test_event = {
