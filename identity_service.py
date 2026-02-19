@@ -84,8 +84,8 @@ def calculate_iou(box_a: list, box_b: list) -> float:
         x2_inter = min(x2_a, x2_b)
         y2_inter = min(y2_a, y2_b)
         
-        # Check if there's no intersection
-        if x2_inter < x1_inter or y2_inter < y1_inter:
+        # Check if there's no intersection (including edge-touching case)
+        if x2_inter <= x1_inter or y2_inter <= y1_inter:
             return 0.0
         
         intersection_area = (x2_inter - x1_inter) * (y2_inter - y1_inter)
@@ -394,15 +394,15 @@ def handle_snapshot_for_display(client, msg):
                 active_persons.append(detection)
                 
                 # Calculate composite score
-                # Since we don't have the snapshot's box, we use temporal scoring
-                # but consider the presence of box data as a quality signal
+                # Note: Snapshot MQTT messages don't include bounding box data directly.
+                # The detection boxes are stored for future use when snapshot boxes become available.
+                # Currently uses temporal-only scoring via the composite score function (iou=0.0)
                 detection_box = detection.get("box")
                 
-                # For now, use temporal-only scoring (spatial data will help in future
-                # when snapshot box extraction is implemented)
+                # Use composite scoring framework (currently temporal-only until snapshot boxes available)
                 score = calculate_correlation_score(
                     temporal_delta=temporal_delta,
-                    iou=0.0,  # No snapshot box available yet
+                    iou=0.0,  # Snapshot boxes not in MQTT payload; infrastructure ready for future use
                     temporal_weight=TEMPORAL_CORRELATION_WEIGHT,
                     spatial_weight=SPATIAL_CORRELATION_WEIGHT,
                     max_temporal_window=SNAPSHOT_CORRELATION_WINDOW
