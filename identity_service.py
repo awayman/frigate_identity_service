@@ -10,6 +10,7 @@ import base64
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
+from mqtt_utils import get_mqtt_client
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -306,7 +307,7 @@ def handle_snapshot_for_display(client, msg):
     
     print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})")
 
-client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+client = get_mqtt_client()
 client.on_connect = on_connect
 client.on_message = on_message
 

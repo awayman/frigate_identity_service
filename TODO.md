@@ -273,7 +273,7 @@ Comprehensive list of discussed features and their implementation status.
 ## 🎯 Recommended Next Steps (Priority Order)
 
 ### Phase 1: Core Stability (Next Sprint)
-1. Fix MQTT client compatibility issues (CallbackAPIVersion)
+1. ~~Fix MQTT client compatibility issues (CallbackAPIVersion)~~ ✅ **COMPLETED**
 2. Load and parse `persons.yaml` configuration
 3. Implement basic confidence decay (time-based)
 4. Add MQTT reconnection logic

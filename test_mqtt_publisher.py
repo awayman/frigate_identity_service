@@ -17,6 +17,8 @@ import argparse
 from PIL import Image
 import io
 
+from mqtt_utils import get_mqtt_client
+
 
 def create_test_image(color_name="red", width=256, height=128):
     """Create a test person crop image."""
@@ -88,7 +90,7 @@ def main():
     
     args = parser.parse_args()
     
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    client = get_mqtt_client()
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     # Determine credentials: CLI args take precedence, then environment variables
