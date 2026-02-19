@@ -155,6 +155,9 @@ def start_config_file_watcher():
     event_handler = PersonsConfigFileHandler(config_path)
     observer = Observer()
     observer.schedule(event_handler, watch_directory, recursive=False)
+    # Use daemon thread so it doesn't block shutdown. This means in-flight reload
+    # operations may be lost on exit, but this is acceptable for config files.
+    # The main MQTT loop will handle graceful shutdown if needed.
     observer.daemon = True
     observer.start()
     

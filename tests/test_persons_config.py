@@ -9,19 +9,6 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import functions to test - we need to do this carefully to avoid running the main code
-import importlib.util
-
-def get_module_functions():
-    """Load the identity_service module and extract needed functions."""
-    spec = importlib.util.spec_from_file_location(
-        "identity_service_test",
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "identity_service.py")
-    )
-    # We can't directly import because it has initialization code that runs
-    # Instead we'll test the functions in isolation
-    return spec
-
 @pytest.fixture
 def temp_persons_file():
     """Create a temporary persons.yaml file for testing."""
