@@ -10,7 +10,7 @@ import base64
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
-from mqtt_utils import get_mqtt_client
+from mqtt_utils import get_mqtt_client, MQTTConnectionManager
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -23,6 +23,8 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+RECONNECT_INITIAL_DELAY = int(os.getenv("RECONNECT_INITIAL_DELAY", "1"))
+MAX_RECONNECT_DELAY = int(os.getenv("MAX_RECONNECT_DELAY", "60"))
 
 # Initialize modules
 print("Initializing embedding store...")
@@ -51,6 +53,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
     print(f"Frigate API endpoint: {FRIGATE_HOST}")
     
+    # Notify connection manager of successful connection
+    if hasattr(client, '_connection_manager'):
+        client._connection_manager.handle_connect()
+    
     # Subscribe to tracked object updates (includes face recognition via sub_label)
     client.subscribe("frigate/+/+/update")
     print("Subscribed to: frigate/+/+/update")
@@ -63,6 +69,36 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate/+/car/snapshot")
     client.subscribe("frigate/+/truck/snapshot")
     print("Subscribed to vehicle snapshots")
+
+def on_disconnect(client, userdata, disconnect_flags=None, reason_code=None, properties=None):
+    """
+    Handle MQTT disconnection.
+    Compatible with both paho-mqtt 1.x and 2.x.
+    
+    paho-mqtt 1.x signature: (client, userdata, rc)
+    paho-mqtt 2.x signature: (client, userdata, disconnect_flags, reason_code, properties)
+    """
+    # Handle both 1.x (rc as 3rd arg) and 2.x (reason_code as 4th arg)
+    if reason_code is None:
+        # paho-mqtt 1.x - disconnect_flags is actually rc
+        rc = disconnect_flags if disconnect_flags is not None else 0
+        reason_string = f"rc={rc}"
+    else:
+        # paho-mqtt 2.x
+        rc = reason_code
+        reason_string = f"reason_code={reason_code}"
+    
+    print(f"[MQTT] WARNING: Disconnected from MQTT Broker ({reason_string})")
+    
+    # Notify connection manager of disconnection
+    if hasattr(client, '_connection_manager'):
+        client._connection_manager.handle_disconnect(rc, reason_string)
+    
+    # paho-mqtt handles reconnection automatically via reconnect_delay_set
+    # We just log and let the built-in reconnection logic work
+    if rc != 0:
+        print(f"[MQTT] INFO: Automatic reconnection will be attempted...")
+
 
 def on_message(client, userdata, msg):
     """Route messages to appropriate handlers based on topic"""
@@ -79,6 +115,7 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
     """
     Fetch snapshot from Frigate API for a specific event.
     Uses caching to avoid redundant API calls.
+    Retries up to 3 times on failure with 0.5s delay between retries.
     
     Returns: base64-encoded JPEG string, or None if failed
     """
@@ -90,32 +127,48 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
         if now - cached_time < CACHE_TTL:
             return cached_img
     
-    try:
-        # Use thumbnail endpoint with crop parameter
-        url = f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg"
-        params = {
-            "crop": "1" if crop else "0",
-            "quality": quality,
-            "h": height
-        }
-        
-        response = requests.get(url, params=params, timeout=5)
-        
-        if response.status_code == 200:
-            # Convert to base64 for ReID model
-            image_base64 = base64.b64encode(response.content).decode('utf-8')
+    # Retry configuration
+    max_retries = 3
+    retry_delay = 0.5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Use thumbnail endpoint with crop parameter
+            url = f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg"
+            params = {
+                "crop": "1" if crop else "0",
+                "quality": quality,
+                "h": height
+            }
             
-            # Cache the result
-            snapshot_cache[event_id] = (image_base64, now)
+            response = requests.get(url, params=params, timeout=5)
             
-            return image_base64
-        else:
-            print(f"[API] Failed to fetch snapshot for {event_id}: HTTP {response.status_code}")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        print(f"[API] Error fetching snapshot for {event_id}: {e}")
-        return None
+            if response.status_code == 200:
+                # Convert to base64 for ReID model
+                image_base64 = base64.b64encode(response.content).decode('utf-8')
+                
+                # Cache the result
+                snapshot_cache[event_id] = (image_base64, now)
+                
+                return image_base64
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                if attempt < max_retries - 1:
+                    print(f"[API] Warning: Failed to fetch snapshot for {event_id}: {error_msg} (attempt {attempt + 1}/{max_retries}, retrying...)")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"[API] Warning: Failed to fetch snapshot for {event_id}: {error_msg} (all retries exhausted)")
+                    return None
+                
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                print(f"[API] Warning: Error fetching snapshot for {event_id}: {e} (attempt {attempt + 1}/{max_retries}, retrying...)")
+                time.sleep(retry_delay)
+            else:
+                print(f"[API] Warning: Error fetching snapshot for {event_id}: {e} (all retries exhausted)")
+                return None
+    
+    return None
 
 def publish_identity_event(client, person_id, camera, confidence, source, zones, event_id, timestamp):
     """Publish identity event to Home Assistant"""
@@ -130,8 +183,15 @@ def publish_identity_event(client, person_id, camera, confidence, source, zones,
         "snapshot_url": f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg?crop=1"
     }
     
-    # Publish to person-specific topic
-    client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
+    # Publish to person-specific topic using connection manager if available
+    topic = f"identity/person/{person_id}"
+    payload = json.dumps(identity_event)
+    
+    if hasattr(client, '_connection_manager'):
+        client._connection_manager.publish_or_queue(topic, payload)
+    else:
+        client.publish(topic, payload)
+    
     print(f"[{source.upper()}] {person_id} at {camera} (zones: {zones}, confidence: {confidence:.3f})")
 
 def handle_tracked_object_update(client, msg):
@@ -246,10 +306,14 @@ def handle_snapshot_for_display(client, msg):
             "camera": camera,
             "timestamp": int(now * 1000)
         }
-        client.publish("identity/vehicle/detected", json.dumps(vehicle_event))
         
-        # Store snapshot for HA display
-        client.publish(f"identity/snapshots/vehicle_{camera}", image_bytes, retain=True)
+        if hasattr(client, '_connection_manager'):
+            client._connection_manager.publish_or_queue("identity/vehicle/detected", json.dumps(vehicle_event))
+            client._connection_manager.publish_or_queue(f"identity/snapshots/vehicle_{camera}", image_bytes, retain=True)
+        else:
+            client.publish("identity/vehicle/detected", json.dumps(vehicle_event))
+            client.publish(f"identity/snapshots/vehicle_{camera}", image_bytes, retain=True)
+        
         print(f"[VEHICLE] {object_type} detected at {camera}")
         return
     
@@ -291,7 +355,10 @@ def handle_snapshot_for_display(client, msg):
         confidence_note = "unknown"
     
     # FAST PUBLISH: Send snapshot directly to HA for dashboard
-    client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+    if hasattr(client, '_connection_manager'):
+        client._connection_manager.publish_or_queue(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+    else:
+        client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
     
     # Update snapshot metadata
     snapshot_metadata = {
@@ -303,13 +370,42 @@ def handle_snapshot_for_display(client, msg):
         "active_persons_count": len(active_persons),
         "zones": matched_person.get("zones", [])
     }
-    client.publish(f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata))
+    
+    if hasattr(client, '_connection_manager'):
+        client._connection_manager.publish_or_queue(f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata))
+    else:
+        client.publish(f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata))
     
     print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})")
 
+def on_disconnect_status(reason_code, reason_string):
+    """Callback for connection manager disconnect events."""
+    print(f"[MQTT] Connection lost: {reason_string}")
+
+def on_reconnect_status(reconnect_count):
+    """Callback for connection manager reconnect events."""
+    print(f"[MQTT] INFO: Successfully reconnected after {reconnect_count} attempt(s)")
+
 client = get_mqtt_client()
 client.on_connect = on_connect
+client.on_disconnect = on_disconnect
 client.on_message = on_message
+
+# Initialize connection manager
+connection_manager = MQTTConnectionManager(
+    client,
+    initial_delay=RECONNECT_INITIAL_DELAY,
+    max_delay=MAX_RECONNECT_DELAY,
+    max_queue_size=100,
+    max_retries=-1  # Unlimited retries
+)
+
+# Set up callbacks
+connection_manager.set_disconnect_callback(on_disconnect_status)
+connection_manager.set_reconnect_callback(on_reconnect_status)
+
+# Attach connection manager to client for access in handlers
+client._connection_manager = connection_manager
 
 try:
     # If username is provided, configure credentials
