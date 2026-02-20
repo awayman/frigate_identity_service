@@ -35,6 +35,35 @@ def load_env_file(env_file_path):
         print(f"Warning: Failed to load {env_file_path}: {e}")
 
 
+def load_ha_options(options_file="/data/options.json"):
+    """Load configuration from Home Assistant Add-on options file.
+    
+    When deployed as a Home Assistant Add-on, the Supervisor writes the
+    user's add-on configuration to /data/options.json.  This function reads
+    that file and maps each option (e.g. ``mqtt_broker``) to the
+    corresponding upper-case environment variable (e.g. ``MQTT_BROKER``),
+    but only when the variable has not already been set in the environment.
+    """
+    if not Path(options_file).exists():
+        return
+
+    try:
+        with open(options_file, 'r') as f:
+            options = json.load(f)
+
+        for key, value in options.items():
+            env_key = key.upper()
+            if env_key not in os.environ and value not in (None, ""):
+                os.environ[env_key] = str(value)
+
+        print(f"Loaded Home Assistant Add-on configuration from {options_file}")
+    except Exception as e:
+        print(f"Warning: Failed to load {options_file}: {e}")
+
+
+# Load configuration from Home Assistant Add-on options (if running as HA add-on)
+load_ha_options()
+
 # Load configuration from .env.integration-test if it exists
 test_env_path = Path(__file__).parent / '.env.integration-test'
 if test_env_path.exists():

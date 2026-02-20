@@ -1,0 +1,37 @@
+name: "Frigate Identity Service"
+version: "0.1.0"
+slug: "frigate_identity_service"
+description: "Person re-identification service for Frigate NVR. Maintains identity continuity using ReID when faces are not visible. GPU acceleration is not required."
+url: "https://github.com/awayman/frigate_identity_service"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: services
+boot: auto
+options:
+  mqtt_broker: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  frigate_host: "http://homeassistant.local:5000"
+  reid_model: "osnet_x1_0"
+  reid_device: "cpu"
+  reid_similarity_threshold: 0.6
+  embeddings_db_path: "/data/embeddings.json"
+  snapshot_correlation_window: 2.0
+  max_tracked_persons_per_camera: 3
+schema:
+  mqtt_broker: str
+  mqtt_port: int
+  mqtt_username: str?
+  mqtt_password: str?
+  frigate_host: str
+  reid_model: str
+  reid_device: str
+  reid_similarity_threshold: float
+  embeddings_db_path: str
+  snapshot_correlation_window: float
+  max_tracked_persons_per_camera: int
+map:
+  - data:rw
