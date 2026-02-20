@@ -44,8 +44,11 @@ Lightweight ReID service that provides person identification continuity for Frig
 
 **Files:**
 - **`identity_service.py`**: Main service consuming Frigate events and publishing identity messages. See [identity_service.py](identity_service.py).
-- **`requirements.txt`**: Python dependencies. See [requirements.txt](requirements.txt).
-- **`Dockerfile`**: Container image build. See [Dockerfile](Dockerfile).
+- **`requirements.txt`**: Python dependencies (GPU-capable). See [requirements.txt](requirements.txt).
+- **`requirements-cpu.txt`**: CPU-only Python dependencies for Home Assistant Add-on. See [requirements-cpu.txt](requirements-cpu.txt).
+- **`Dockerfile`**: Container image build (CPU-only by default; pass `--build-arg USE_GPU=true` for GPU). See [Dockerfile](Dockerfile).
+- **`config.yaml`**: Home Assistant Add-on manifest. See [config.yaml](config.yaml).
+- **`run.sh`**: Container entry point used by the Home Assistant Add-on. See [run.sh](run.sh).
 
 **Local setup (Windows PowerShell)**
 
@@ -73,12 +76,33 @@ If activation fails, install into the venv directly:
 
 **Docker**
 
-Build and run the container:
+Build and run the container (CPU-only, suitable for most deployments):
 
 ```bash
 docker build -t frigate-identity .
 docker run --env MQTT_BROKER=host.docker.internal --env MQTT_PORT=1883 frigate-identity
 ```
+
+To build with GPU (CUDA) support:
+
+```bash
+docker build --build-arg USE_GPU=true -t frigate-identity-gpu .
+docker run --gpus all --env MQTT_BROKER=host.docker.internal --env MQTT_PORT=1883 frigate-identity-gpu
+```
+
+**Home Assistant Add-on**
+
+This repository can be used directly as a Home Assistant Add-on repository.  GPU acceleration is not required when deployed as an Add-on; the service falls back to CPU-based ReID automatically.
+
+1. In Home Assistant, navigate to **Settings → Add-ons → Add-on Store**.
+2. Click the three-dot menu (⋮) and select **Repositories**.
+3. Add this repository URL: `https://github.com/awayman/frigate_identity_service`
+4. Find **Frigate Identity Service** in the store and click **Install**.
+5. Configure the add-on options (MQTT broker, Frigate host, etc.) and click **Start**.
+
+Configuration is written by the Supervisor to `/data/options.json` and is read automatically on startup.  All options from `config.yaml` map to the environment variables listed above (e.g. `mqtt_broker` → `MQTT_BROKER`).
+
+> **Note:** GPU acceleration is not available in Home Assistant Add-on deployments.  The ReID model runs on CPU, which is sufficient for most home use cases.  For GPU-accelerated deployments, use the standalone Docker image built with `--build-arg USE_GPU=true`.
 
 **Development / VS Code**
 

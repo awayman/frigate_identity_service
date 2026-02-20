@@ -1,0 +1,11 @@
+paho-mqtt==2.1.0
+requests>=2.31.0
+# CPU-only PyTorch - significantly smaller image, suitable for Home Assistant Add-on
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.16.0
+timm>=0.9.0
+Pillow>=10.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+sqlalchemy>=2.0.0
