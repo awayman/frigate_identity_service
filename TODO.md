@@ -150,9 +150,9 @@ Comprehensive list of discussed features and their implementation status.
 - [x] Basic temporal correlation (2-second window)
 - [x] Camera-based person queue
 - [x] Multi-person conflict detection
-- [ ] Spatial correlation (bounding box matching)
-- [ ] Improved multi-person handling (assign snapshots to correct person)
-- [ ] Confidence scoring for correlation quality
+- [x] Spatial correlation (bounding box matching)
+- [x] Improved multi-person handling (assign snapshots to correct person)
+- [x] Confidence scoring for correlation quality
 - [ ] Fallback strategies when correlation fails
 - [ ] Zone-based snapshot filtering
 
