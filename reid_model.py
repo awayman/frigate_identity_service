@@ -8,12 +8,14 @@ try:
     import torch
     import torch.nn as nn
     import torchvision.transforms as transforms
+    from torchvision.models import ResNet50_Weights
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
     torch = None
     nn = None
     transforms = None
+    ResNet50_Weights = None
 
 try:
     import numpy as np
@@ -74,7 +76,7 @@ class ReIDModel:
             # Fallback: use a simple ResNet50 feature extractor
             print(f"Falling back to ResNet50 feature extractor...")
             from torchvision.models import resnet50
-            resnet = resnet50(pretrained=True)
+            resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
             # Remove the final classification layer to get 2048-dim features
             self.model = nn.Sequential(*list(resnet.children())[:-1])
             self.model = self.model.to(self.device)

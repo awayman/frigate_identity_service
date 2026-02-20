@@ -14,11 +14,15 @@ import json
 import time
 import subprocess
 import requests
+import urllib3
 import paho.mqtt.client as mqtt
 import signal
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+
+# Suppress SSL warnings for self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Colors:
@@ -128,12 +132,8 @@ class IntegrationTestRunner:
     def _test_mqtt_connection(self, broker, port):
         """Test MQTT connection."""
         try:
-            # Try to create client with version 2.0 API first
-            try:
-                client = mqtt.Client(mqtt.CallbackAPIVersion.V1)
-            except (AttributeError, TypeError):
-                # Fall back to older API if version 2.0 is not available
-                client = mqtt.Client()
+            from mqtt_utils import get_mqtt_client
+            client = get_mqtt_client()
             
             username = self.config.get('MQTT_USERNAME')
             password = self.config.get('MQTT_PASSWORD')
@@ -282,10 +282,8 @@ class IntegrationTestRunner:
         
         try:
             # Create MQTT client for listening
-            try:
-                listen_client = mqtt.Client(mqtt.CallbackAPIVersion.V1)
-            except (AttributeError, TypeError):
-                listen_client = mqtt.Client()
+            from mqtt_utils import get_mqtt_client
+            listen_client = get_mqtt_client()
             
             username = self.config.get('MQTT_USERNAME')
             password = self.config.get('MQTT_PASSWORD')

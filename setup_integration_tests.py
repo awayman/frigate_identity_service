@@ -15,8 +15,12 @@ import sys
 import json
 import time
 import requests
+import urllib3
 import paho.mqtt.client as mqtt
 from pathlib import Path
+
+# Suppress SSL warnings for self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Colors:
@@ -64,12 +68,8 @@ def test_mqtt_connection(broker, port, username=None, password=None):
     print_info(f"Testing MQTT connection to {broker}:{port}...")
     
     try:
-        # Try to create client with version 2.0 API first
-        try:
-            client = mqtt.Client(mqtt.CallbackAPIVersion.V1)
-        except (AttributeError, TypeError):
-            # Fall back to older API if version 2.0 is not available
-            client = mqtt.Client()
+        from mqtt_utils import get_mqtt_client
+        client = get_mqtt_client()
         
         if username and password:
             client.username_pw_set(username, password)
