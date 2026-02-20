@@ -1,5 +1,6 @@
 # Sensitive Data - NEVER commit these
 .env
+.env.integration-test
 embeddings.json
 persons.yaml
 config.json

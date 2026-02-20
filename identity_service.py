@@ -6,11 +6,40 @@ import os
 import traceback
 import requests
 import base64
+from pathlib import Path
 
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
 from mqtt_utils import get_mqtt_client
+
+
+def load_env_file(env_file_path):
+    """Load environment variables from a .env file."""
+    if not Path(env_file_path).exists():
+        return
+    
+    try:
+        with open(env_file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        # Only set if not already in environment
+                        if key not in os.environ:
+                            os.environ[key] = value
+    except Exception as e:
+        print(f"Warning: Failed to load {env_file_path}: {e}")
+
+
+# Load configuration from .env.integration-test if it exists
+test_env_path = Path(__file__).parent / '.env.integration-test'
+if test_env_path.exists():
+    print(f"Loading configuration from {test_env_path}")
+    load_env_file(str(test_env_path))
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
