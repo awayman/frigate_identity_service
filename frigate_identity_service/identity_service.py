@@ -74,6 +74,8 @@ MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+MQTT_CONNECT_RETRIES = int(os.getenv("MQTT_CONNECT_RETRIES", "30"))
+MQTT_CONNECT_RETRY_DELAY = int(os.getenv("MQTT_CONNECT_RETRY_DELAY", "5"))
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
@@ -365,16 +367,41 @@ def handle_snapshot_for_display(client, msg):
     
     print(f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})")
 
+def connect_with_retry(client, broker, port, max_attempts, retry_delay):
+    """Attempt to connect to the MQTT broker, retrying on failure.
+
+    Args:
+        client: paho MQTT client instance.
+        broker: MQTT broker hostname or IP.
+        port: MQTT broker port.
+        max_attempts: Total number of connection attempts to make.
+        retry_delay: Seconds to wait between attempts.
+
+    Returns:
+        True if connected successfully, False if all attempts were exhausted.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client.connect(broker, port, 60)
+            return True
+        except Exception as e:
+            print(f"Failed to connect to MQTT broker at {broker}:{port} "
+                  f"(attempt {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    return False
+
+
 client = get_mqtt_client()
 client.on_connect = on_connect
 client.on_message = on_message
 
-try:
-    # If username is provided, configure credentials
-    if MQTT_USERNAME:
-        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+if MQTT_USERNAME:
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+if connect_with_retry(client, MQTT_BROKER, MQTT_PORT, MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY):
     client.loop_forever()
-except Exception as e:
-    print(f"Failed to connect to MQTT broker: {e}")
+else:
+    print(f"Could not connect to MQTT broker after {MQTT_CONNECT_RETRIES} attempts. Exiting.")
+    raise SystemExit(1)

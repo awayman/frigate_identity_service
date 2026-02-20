@@ -147,6 +147,7 @@ class TestLoadHaOptions:
         import ast
         src_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
             "identity_service.py",
         )
         with open(src_path) as f:
@@ -233,6 +234,85 @@ class TestLoadHaOptions:
 
         # Should not raise
         load_ha_options(options_file=str(options_file))
+
+
+class TestConnectWithRetry:
+    """Tests for the connect_with_retry function."""
+
+    def _get_connect_with_retry(self):
+        """Extract connect_with_retry from identity_service without executing the module."""
+        import ast
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "identity_service.py",
+        )
+        with open(src_path) as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+        func_def = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "connect_with_retry"
+        )
+        module = ast.Module(body=[func_def], type_ignores=[])
+        code = compile(module, src_path, "exec")
+        ns = {"os": os, "time": __import__("time")}
+        exec(code, ns)
+        return ns["connect_with_retry"]
+
+    def test_succeeds_on_first_attempt(self):
+        """connect_with_retry returns True when connect succeeds immediately."""
+        connect_with_retry = self._get_connect_with_retry()
+
+        class FakeClient:
+            def connect(self, broker, port, keepalive):
+                pass
+
+        assert connect_with_retry(FakeClient(), "localhost", 1883, max_attempts=3, retry_delay=0) is True
+
+    def test_retries_then_succeeds(self):
+        """connect_with_retry retries after failures and returns True on eventual success."""
+        connect_with_retry = self._get_connect_with_retry()
+
+        class FakeClient:
+            def __init__(self):
+                self.attempts = 0
+
+            def connect(self, broker, port, keepalive):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise OSError("[Errno 111] Connection refused")
+
+        client = FakeClient()
+        assert connect_with_retry(client, "localhost", 1883, max_attempts=5, retry_delay=0) is True
+        assert client.attempts == 3
+
+    def test_returns_false_after_all_retries_exhausted(self):
+        """connect_with_retry returns False when all attempts fail."""
+        connect_with_retry = self._get_connect_with_retry()
+
+        class FakeClient:
+            def __init__(self):
+                self.attempts = 0
+
+            def connect(self, broker, port, keepalive):
+                self.attempts += 1
+                raise OSError("[Errno 111] Connection refused")
+
+        client = FakeClient()
+        assert connect_with_retry(client, "localhost", 1883, max_attempts=3, retry_delay=0) is False
+        assert client.attempts == 3
+
+    def test_no_retries_when_max_attempts_is_zero(self):
+        """connect_with_retry makes no attempts when max_attempts=0."""
+        connect_with_retry = self._get_connect_with_retry()
+
+        class FakeClient:
+            def connect(self, broker, port, keepalive):
+                raise OSError("[Errno 111] Connection refused")
+
+        assert connect_with_retry(FakeClient(), "localhost", 1883, max_attempts=0, retry_delay=0) is False
 
 
 if __name__ == "__main__":
