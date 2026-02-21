@@ -26,11 +26,10 @@ except ImportError:
 class ReIDModel:
     """Person re-identification model wrapper."""
 
-    def __init__(self, model_name: str = "osnet_x1_0", device: Optional[str] = None):
+    def __init__(self, device: Optional[str] = None):
         """Initialize the ReID model.
 
         Args:
-            model_name: Name of the model to load (from timm or torchvision)
             device: Device to run the model on ("cuda" or "cpu"). Auto-detected if None.
 
         Raises:
@@ -49,7 +48,6 @@ class ReIDModel:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.device = torch.device(device)
-        self.model_name = model_name
         self.model = None
         self._load_model()
 
@@ -65,28 +63,16 @@ class ReIDModel:
         )
 
     def _load_model(self):
-        """Load the pre-trained ReID model."""
-        try:
-            # Try to load from timm first
-            import timm
+        """Load the pre-trained ResNet50 feature extractor."""
+        from torchvision.models import resnet50
 
-            print(f"Loading ReID model '{self.model_name}' from timm...")
-            self.model = timm.create_model(self.model_name, pretrained=True)
-            self.model = self.model.to(self.device)
-            self.model.eval()
-            print(f"Successfully loaded model on device: {self.device}")
-        except Exception as e:
-            print(f"Failed to load model from timm: {e}")
-            # Fallback: use a simple ResNet50 feature extractor
-            print("Falling back to ResNet50 feature extractor...")
-            from torchvision.models import resnet50
-
-            resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-            # Remove the final classification layer to get 2048-dim features
-            self.model = nn.Sequential(*list(resnet.children())[:-1])
-            self.model = self.model.to(self.device)
-            self.model.eval()
-            print(f"Successfully loaded ResNet50 on device: {self.device}")
+        print("Loading ResNet50 feature extractor...")
+        resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        # Remove the final classification layer to get 2048-dim features
+        self.model = nn.Sequential(*list(resnet.children())[:-1])
+        self.model = self.model.to(self.device)
+        self.model.eval()
+        print(f"Successfully loaded ResNet50 on device: {self.device}")
 
     def extract_embedding(self, base64_image: str) -> np.ndarray:
         """Extract re-identification embedding from a base64-encoded image.
