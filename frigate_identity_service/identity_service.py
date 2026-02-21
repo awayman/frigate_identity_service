@@ -271,10 +271,8 @@ def handle_frigate_event(client, msg):
 
     # Parse sub_label: Frigate sends ["Name", score] or null
     sub_label = None
-    sub_label_score = 0.0
     if isinstance(raw_sub_label, list) and len(raw_sub_label) >= 2:
         sub_label = raw_sub_label[0]
-        sub_label_score = float(raw_sub_label[1])
     elif isinstance(raw_sub_label, str) and raw_sub_label:
         sub_label = raw_sub_label
 
