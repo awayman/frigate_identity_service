@@ -13,7 +13,7 @@ LABEL \
   org.opencontainers.image.licenses="MIT" \
   io.hass.version="${BUILD_VERSION}" \
   io.hass.type="addon" \
-  io.hass.arch="amd64|aarch64|armv7"
+  io.hass.arch="amd64|aarch64"
 
 # Build arg: set to "true" to install GPU-capable PyTorch instead of CPU-only.
 # Default is CPU-only, which is required for Home Assistant Add-on deployments.
