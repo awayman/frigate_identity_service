@@ -41,11 +41,18 @@ COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.
 RUN python - <<'EOF'
 import sys, types
 
-# torchreid imports tensorboard at the top level even though it is only needed
-# for training, not inference.  Stub it out so the import succeeds without
-# requiring the ~150 MB tensorboard package to be installed.
+# torchreid imports tensorboard at the top level and checks its version,
+# even though it is only needed for training, not inference.
+# Stub it out with a fake module that satisfies the version check so the
+# import succeeds without requiring the ~150 MB tensorboard package.
+def _make_tb_stub(name):
+    mod = types.ModuleType(name)
+    mod.__version__ = "2.0.0"   # satisfies the ">= 1.15" version check inside torchreid
+    mod.__path__ = []            # makes it look like a package for sub-module imports
+    return mod
+
 for _mod in ("tensorboard", "tensorboard.summary", "tensorboard.summary.writer"):
-    sys.modules.setdefault(_mod, types.ModuleType(_mod))
+    sys.modules.setdefault(_mod, _make_tb_stub(_mod))
 
 try:
     from torchreid.utils import FeatureExtractor
