@@ -76,7 +76,6 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_CONNECT_RETRIES = int(os.getenv("MQTT_CONNECT_RETRIES", "30"))
 MQTT_CONNECT_RETRY_DELAY = int(os.getenv("MQTT_CONNECT_RETRY_DELAY", "5"))
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
-REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
@@ -87,10 +86,10 @@ MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA",
 print("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
 
-print(f"Initializing ReID model: {REID_MODEL}")
+print("Initializing ReID model (ResNet50)...")
 device = None if REID_DEVICE == "auto" else REID_DEVICE
 try:
-    reid_model = ReIDModel(model_name=REID_MODEL, device=device)
+    reid_model = ReIDModel(device=device)
     print("ReID system ready!")
     REID_AVAILABLE = True
 except RuntimeError as e:

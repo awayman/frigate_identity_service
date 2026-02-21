@@ -35,6 +35,17 @@ RUN if [ "$USE_GPU" = "true" ]; then \
 # Copy all Python modules
 COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py ./
 
+# Pre-download the ResNet50 weights at build time so startup is instant
+RUN python - <<'EOF'
+import torch
+import torch.nn as nn
+from torchvision.models import resnet50, ResNet50_Weights
+print("Pre-downloading ResNet50 weights into build image cache...")
+resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+model = nn.Sequential(*list(resnet.children())[:-1])
+print("ResNet50 weights cached successfully.")
+EOF
+
 # Startup script (also used as the Home Assistant Add-on entry point)
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
