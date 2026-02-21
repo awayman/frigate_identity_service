@@ -1,6 +1,19 @@
-FROM python:3.11-slim-bookworm
+ARG BUILD_FROM=python:3.11-slim-bookworm
+FROM ${BUILD_FROM}
 
 WORKDIR /app
+
+# OCI labels
+ARG BUILD_VERSION=0.1.0
+LABEL \
+  org.opencontainers.image.title="Frigate Identity Service" \
+  org.opencontainers.image.description="Person re-identification service for Frigate NVR" \
+  org.opencontainers.image.source="https://github.com/awayman/frigate_identity_service" \
+  org.opencontainers.image.version="${BUILD_VERSION}" \
+  org.opencontainers.image.licenses="MIT" \
+  io.hass.version="${BUILD_VERSION}" \
+  io.hass.type="addon" \
+  io.hass.arch="amd64|aarch64|armv7"
 
 # Build arg: set to "true" to install GPU-capable PyTorch instead of CPU-only.
 # Default is CPU-only, which is required for Home Assistant Add-on deployments.

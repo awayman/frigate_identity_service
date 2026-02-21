@@ -1,5 +1,4 @@
 addon: true
-version: 0.1.0
 class: custom
 description: 'Custom Identity Service with Deep Learning Person Re-ID'
 dependencies:
