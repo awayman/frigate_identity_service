@@ -111,7 +111,12 @@ class TestServices:
 
     def test_import_identity_service(self):
         """Test that identity_service can be parsed."""
-        with open("identity_service.py") as f:
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "identity_service.py",
+        )
+        with open(src_path) as f:
             code = f.read()
             assert "on_connect" in code
             assert "on_message" in code
