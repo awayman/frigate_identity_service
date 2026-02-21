@@ -121,9 +121,15 @@ def on_connect(client, userdata, flags, rc, properties=None):
     logger.info("Connected to MQTT Broker at %s:%s", MQTT_BROKER, MQTT_PORT)
     logger.info("Frigate API endpoint: %s", FRIGATE_HOST)
 
-    # Subscribe to tracked object updates (includes face recognition via sub_label)
-    client.subscribe("frigate/+/+/update")
-    logger.info("Subscribed to: frigate/+/+/update")
+    # Subscribe to tracked object events (new/update/end for all objects)
+    # See: https://docs.frigate.video/integrations/mqtt#frigateevents
+    client.subscribe("frigate/events")
+    logger.info("Subscribed to: frigate/events")
+
+    # Subscribe to tracked object metadata updates (face recognition, LPR, etc.)
+    # See: https://docs.frigate.video/integrations/mqtt#frigatetracked_object_update
+    client.subscribe("frigate/tracked_object_update")
+    logger.info("Subscribed to: frigate/tracked_object_update")
 
     # Subscribe to person snapshots for fast display
     client.subscribe("frigate/+/person/snapshot")
@@ -145,7 +151,9 @@ def on_connect(client, userdata, flags, rc, properties=None):
 def on_message(client, userdata, msg):
     """Route messages to appropriate handlers based on topic"""
     try:
-        if "/update" in msg.topic:
+        if msg.topic == "frigate/events":
+            handle_frigate_event(client, msg)
+        elif msg.topic == "frigate/tracked_object_update":
             handle_tracked_object_update(client, msg)
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
@@ -226,27 +234,59 @@ def publish_identity_event(
     )
 
 
-def handle_tracked_object_update(client, msg):
+def handle_frigate_event(client, msg):
     """
-    Process Frigate tracked object update.
-    Builds correlation data for snapshot matching and fetches accurate embeddings via API.
+    Process Frigate event messages from the 'frigate/events' topic.
+
+    Payload structure (per Frigate docs):
+        {"type": "new"|"update"|"end", "before": {...}, "after": {...}}
+
+    The 'after' dict contains the current state of the tracked object with
+    fields like id, camera, label, sub_label, current_zones, top_score, etc.
+    sub_label is either null or ["Name", score].
     """
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except json.JSONDecodeError:
-        logger.warning("[UPDATE] Could not decode JSON from %s", msg.topic)
+        logger.warning("[EVENT] Could not decode JSON from %s", msg.topic)
         return
 
-    camera = payload.get("camera")
-    event_id = payload.get("id")
-    label = payload.get("label")
-    sub_label = payload.get("sub_label")  # Face recognition result from Frigate
-    current_zones = payload.get("current_zones", [])
-    confidence = payload.get("top_score", payload.get("score", 0))
-    timestamp = payload.get("frame_time", time.time())
+    event_type = payload.get("type")  # "new", "update", or "end"
+    after = payload.get("after", {})
+
+    camera = after.get("camera")
+    event_id = after.get("id")
+    label = after.get("label")
+    raw_sub_label = after.get("sub_label")  # null or ["Name", score]
+    current_zones = after.get("current_zones", [])
+    confidence = after.get("top_score", after.get("score", 0))
+    timestamp = after.get("frame_time", time.time())
 
     if label != "person":
         return  # Only process person objects
+
+    # Parse sub_label: Frigate sends ["Name", score] or null
+    sub_label = None
+    sub_label_score = 0.0
+    if isinstance(raw_sub_label, list) and len(raw_sub_label) >= 2:
+        sub_label = raw_sub_label[0]
+        sub_label_score = float(raw_sub_label[1])
+    elif isinstance(raw_sub_label, str) and raw_sub_label:
+        sub_label = raw_sub_label
+
+    logger.info(
+        "[EVENT] %s person on %s (event=%s, zones=%s, score=%.2f, sub_label=%s)",
+        event_type,
+        camera,
+        event_id,
+        current_zones,
+        confidence,
+        sub_label,
+    )
+
+    # Skip end events — person has left the frame
+    if event_type == "end":
+        return
 
     # Add to camera tracking queue for snapshot correlation
     detection_record = {
@@ -256,8 +296,8 @@ def handle_tracked_object_update(client, msg):
         "confidence": confidence,
     }
 
-    # SCENARIO A: Frigate identified face via facial recognition
-    if sub_label and sub_label != "":
+    # SCENARIO A: Frigate identified face via facial recognition (sub_label set)
+    if sub_label:
         person_id = sub_label
         detection_record["person_id"] = person_id
 
@@ -337,6 +377,79 @@ def handle_tracked_object_update(client, msg):
             traceback.print_exc()
 
 
+def handle_tracked_object_update(client, msg):
+    """
+    Process Frigate tracked_object_update messages (face recognition, LPR, etc.).
+
+    Face recognition payload:
+        {"type": "face", "id": "...", "name": "John", "score": 0.95,
+         "camera": "front_door_cam", "timestamp": ...}
+    """
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("[TRACKED_UPDATE] Could not decode JSON from %s", msg.topic)
+        return
+
+    update_type = payload.get("type")
+
+    if update_type == "face":
+        person_id = payload.get("name")
+        event_id = payload.get("id")
+        score = payload.get("score", 0.0)
+        camera = payload.get("camera")
+        timestamp = payload.get("timestamp", time.time())
+
+        if not person_id or not event_id:
+            return
+
+        logger.info(
+            "[FACE_UPDATE] Face recognized: %s on %s (event=%s, score=%.2f)",
+            person_id,
+            camera,
+            event_id,
+            score,
+        )
+
+        # Add to correlation queue
+        detection_record = {
+            "event_id": event_id,
+            "timestamp": timestamp,
+            "zones": [],
+            "confidence": score,
+            "person_id": person_id,
+        }
+        camera_person_queue[camera].append(detection_record)
+
+        # Fetch snapshot and store embedding for ReID learning
+        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
+        if snapshot_base64 and REID_AVAILABLE:
+            try:
+                embedding = reid_model.extract_embedding(snapshot_base64)
+                embedding_store.store_embedding(
+                    person_id, embedding, camera, score
+                )
+                logger.info("[EMBEDDING] Stored embedding from face update for %s", person_id)
+            except Exception as e:
+                logger.error(
+                    "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
+                )
+
+        # Publish identity event
+        publish_identity_event(
+            client,
+            person_id,
+            camera,
+            score,
+            "face_recognition_update",
+            [],
+            event_id,
+            timestamp,
+        )
+    else:
+        logger.debug("[TRACKED_UPDATE] Ignoring update type: %s", update_type)
+
+
 def handle_snapshot_for_display(client, msg):
     """
     FAST PATH: Match MQTT snapshot to recent person detection for live dashboard.
@@ -352,6 +465,9 @@ def handle_snapshot_for_display(client, msg):
 
     image_bytes = msg.payload
     now = time.time()
+
+    if object_type == "person":
+        logger.info("[SNAPSHOT] Person snapshot received from %s", camera)
 
     # Handle vehicle snapshots
     if object_type in ["car", "truck"]:
@@ -376,8 +492,8 @@ def handle_snapshot_for_display(client, msg):
     recent_detections = camera_person_queue.get(camera, deque())
 
     if not recent_detections:
-        logger.debug(
-            "[SNAPSHOT] Received snapshot from %s, but no recent person detection",
+        logger.info(
+            "[SNAPSHOT] No correlated person update for %s — update messages may not be arriving (check MQTT topic format)",
             camera,
         )
         return

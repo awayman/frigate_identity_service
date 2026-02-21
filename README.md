@@ -52,7 +52,8 @@ fully supported.
 **MQTT Topics:**
 
 **Subscriptions:**
-- `frigate/+/+/update` - Tracked object updates (includes face recognition)
+- `frigate/events` - Tracked object updates (new/update/end); contains face recognition via `sub_label` field ([Frigate docs](https://docs.frigate.video/integrations/mqtt#frigateevents))
+- `frigate/tracked_object_update` - Face recognition and LPR metadata updates ([Frigate docs](https://docs.frigate.video/integrations/mqtt#frigatetracked_object_update))
 - `frigate/+/person/snapshot` - Person snapshots (fast display)
 - `frigate/+/car/snapshot` - Vehicle detection
 - `frigate/+/truck/snapshot` - Vehicle detection
