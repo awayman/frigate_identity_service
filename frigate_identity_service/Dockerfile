@@ -36,48 +36,12 @@ RUN if [ "$USE_GPU" = "true" ]; then \
 COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py ./
 
 # Pre-download model weights at build time so startup is instant.
-# When torchreid is available the default OSNet model is used; otherwise
-# fall back to ResNet50 from torchvision.
-RUN python - <<'EOF'
-import sys, types
-
-# torchreid imports tensorboard at the top level and checks its version,
-# even though it is only needed for training, not inference.
-# Stub it out with a fake module that satisfies the version check so the
-# import succeeds without requiring the ~150 MB tensorboard package.
-def _make_tb_stub(name):
-    mod = types.ModuleType(name)
-    mod.__version__ = "2.0.0"   # satisfies the ">= 1.15" version check inside torchreid
-    mod.__path__ = []            # makes it look like a package for sub-module imports
-
-    # Auto-create child stubs on attribute access so any tensorboard.* submodule
-    # that torchreid tries to import is handled without enumerating them all.
-    def __getattr__(attr):
-        child_name = f"{name}.{attr}"
-        child = _make_tb_stub(child_name)
-        sys.modules[child_name] = child
-        setattr(mod, attr, child)
-        return child
-
-    mod.__getattr__ = __getattr__
-    return mod
-
-# Only the top-level stub is needed; children are created lazily on demand.
-sys.modules.setdefault("tensorboard", _make_tb_stub("tensorboard"))
-
-try:
-    from torchreid.utils import FeatureExtractor
-    print("Pre-downloading OSNet (osnet_x1_0) weights via torchreid...")
-    FeatureExtractor(model_name="osnet_x1_0", model_path="", device="cpu")
-    print("OSNet weights cached successfully.")
-except Exception as e:
-    print(f"torchreid not available ({e}), pre-downloading ResNet50 weights...")
-    import torch.nn as nn
-    from torchvision.models import resnet50, ResNet50_Weights
-    resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-    model = nn.Sequential(*list(resnet.children())[:-1])
-    print("ResNet50 weights cached successfully.")
-EOF
+RUN python -c "
+from torchreid.utils import FeatureExtractor
+print('Pre-downloading OSNet (osnet_x1_0) weights...')
+FeatureExtractor(model_name='osnet_x1_0', model_path='', device='cpu')
+print('OSNet weights cached successfully.')
+"
 
 # Startup script (also used as the Home Assistant Add-on entry point)
 COPY run.sh /run.sh
