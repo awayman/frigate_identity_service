@@ -39,6 +39,14 @@ COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.
 # When torchreid is available the default OSNet model is used; otherwise
 # fall back to ResNet50 from torchvision.
 RUN python - <<'EOF'
+import sys, types
+
+# torchreid imports tensorboard at the top level even though it is only needed
+# for training, not inference.  Stub it out so the import succeeds without
+# requiring the ~150 MB tensorboard package to be installed.
+for _mod in ("tensorboard", "tensorboard.summary", "tensorboard.summary.writer"):
+    sys.modules.setdefault(_mod, types.ModuleType(_mod))
+
 try:
     from torchreid.utils import FeatureExtractor
     print("Pre-downloading OSNet (osnet_x1_0) weights via torchreid...")
