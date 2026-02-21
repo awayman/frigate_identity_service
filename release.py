@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -25,8 +24,11 @@ CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 def run(cmd: list[str], check: bool = True, capture: bool = False) -> str:
     """Run a shell command from the repo root."""
     result = subprocess.run(
-        cmd, cwd=REPO_ROOT, check=check,
-        capture_output=capture, text=True,
+        cmd,
+        cwd=REPO_ROOT,
+        check=check,
+        capture_output=capture,
+        text=True,
     )
     return result.stdout.strip() if capture else ""
 
@@ -102,10 +104,18 @@ def check_tag_exists(version: str) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create a release for frigate_identity_service")
-    parser.add_argument("version", help="Version number (e.g. 0.2.0) or bump type (major/minor/patch)")
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying them")
-    parser.add_argument("--no-push", action="store_true", help="Commit and tag locally but don't push")
+    parser = argparse.ArgumentParser(
+        description="Create a release for frigate_identity_service"
+    )
+    parser.add_argument(
+        "version", help="Version number (e.g. 0.2.0) or bump type (major/minor/patch)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview changes without applying them"
+    )
+    parser.add_argument(
+        "--no-push", action="store_true", help="Commit and tag locally but don't push"
+    )
     args = parser.parse_args()
 
     current = get_current_version()
@@ -117,7 +127,9 @@ def main() -> None:
     elif validate_semver(args.version):
         new_version = args.version
     else:
-        sys.exit(f"ERROR: '{args.version}' is not a valid semver or bump type (major/minor/patch)")
+        sys.exit(
+            f"ERROR: '{args.version}' is not a valid semver or bump type (major/minor/patch)"
+        )
 
     if new_version == current:
         sys.exit(f"ERROR: New version {new_version} is the same as current version")
@@ -130,10 +142,12 @@ def main() -> None:
     if args.dry_run:
         print("\n[DRY RUN] Would perform:")
         print(f"  1. Update config.yaml version to {new_version}")
-        print(f"  2. Update CHANGELOG.md with [{new_version}] - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
+        print(
+            f"  2. Update CHANGELOG.md with [{new_version}] - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        )
         print(f"  3. git commit -m 'Release v{new_version}'")
         print(f"  4. git tag v{new_version}")
-        print(f"  5. git push origin main --tags")
+        print("  5. git push origin main --tags")
         return
 
     check_clean_working_tree()
@@ -154,7 +168,7 @@ def main() -> None:
 
     if args.no_push:
         print("\n--no-push specified. To push later:")
-        print(f"  git push origin main --tags")
+        print("  git push origin main --tags")
     else:
         run(["git", "push", "origin", "main", "--tags"])
         print(f"  Pushed to origin/main with tag v{new_version}")
