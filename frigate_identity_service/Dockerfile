@@ -33,16 +33,20 @@ ARG REID_MODEL=osnet_x1_0
 COPY requirements.txt requirements-cpu.txt ./
 
 # Install Python dependencies
+# Install all runtime deps first so that deep-person-reid's setup.py (which
+# imports the full torchreid package tree to find the version) can complete.
 RUN if [ "$USE_GPU" = "true" ]; then \
-      pip install --no-cache-dir Cython numpy && \
-      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git && \
-      pip install --no-cache-dir -r requirements.txt; \
+      pip install --no-cache-dir Cython numpy scipy opencv-python-headless Pillow && \
+      pip install --no-cache-dir -r requirements.txt && \
+      pip install --no-cache-dir --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git && \
+      pip install --no-cache-dir --force-reinstall opencv-python-headless; \
     else \
       (pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu || \
        (echo "CPU wheel index failed, falling back to PyPI..." && pip install --no-cache-dir torch torchvision)) && \
-      pip install --no-cache-dir Cython numpy && \
-      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git && \
-      pip install --no-cache-dir -r requirements-cpu.txt; \
+      pip install --no-cache-dir Cython numpy scipy opencv-python-headless Pillow && \
+      pip install --no-cache-dir -r requirements-cpu.txt && \
+      pip install --no-cache-dir --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git && \
+      pip install --no-cache-dir --force-reinstall opencv-python-headless; \
     fi
 
 # Copy all Python modules
