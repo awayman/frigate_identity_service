@@ -3,6 +3,7 @@ requests>=2.31.0
 # torch and torchvision are installed separately in the Dockerfile
 # using --index-url https://download.pytorch.org/whl/cpu for CPU-only builds
 torchreid>=0.2.5
+opencv-python-headless>=4.8.0
 Pillow>=10.0.0
 numpy>=1.24.0
 scipy>=1.10.0
