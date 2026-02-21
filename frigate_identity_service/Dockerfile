@@ -28,10 +28,12 @@ COPY requirements.txt requirements-cpu.txt ./
 
 # Install Python dependencies
 RUN if [ "$USE_GPU" = "true" ]; then \
+      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git; \
       pip install --no-cache-dir -r requirements.txt; \
     else \
       pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu || \
       (echo "CPU wheel index failed, falling back to PyPI..." && pip install --no-cache-dir torch torchvision); \
+      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git; \
       pip install --no-cache-dir -r requirements-cpu.txt; \
     fi
 

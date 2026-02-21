@@ -2,7 +2,6 @@ paho-mqtt==2.1.0
 requests>=2.31.0
 # torch and torchvision are installed separately in the Dockerfile
 # using --index-url https://download.pytorch.org/whl/cpu for CPU-only builds
-torchreid>=0.2.5
 tensorboard>=1.15
 gdown>=4.6.0
 opencv-python-headless>=4.8.0
