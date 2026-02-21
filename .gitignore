@@ -5,6 +5,10 @@ embeddings.json
 persons.yaml
 config.json
 
+# Model weights (bundled at build time, not committed to git)
+frigate_identity_service/weights/*.pth
+frigate_identity_service/weights/checkpoints/
+
 # Python
 __pycache__/
 *.py[cod]
