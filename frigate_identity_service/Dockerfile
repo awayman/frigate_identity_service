@@ -3,6 +3,12 @@ FROM ${BUILD_FROM}
 
 WORKDIR /app
 
+# Install system build dependencies required by deep-person-reid (builds from source)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # OCI labels
 ARG BUILD_VERSION=0.1.0
 LABEL \
@@ -28,12 +34,14 @@ COPY requirements.txt requirements-cpu.txt ./
 
 # Install Python dependencies
 RUN if [ "$USE_GPU" = "true" ]; then \
-      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git; \
+      pip install --no-cache-dir Cython numpy && \
+      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git && \
       pip install --no-cache-dir -r requirements.txt; \
     else \
-      pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu || \
-      (echo "CPU wheel index failed, falling back to PyPI..." && pip install --no-cache-dir torch torchvision); \
-      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git; \
+      (pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu || \
+       (echo "CPU wheel index failed, falling back to PyPI..." && pip install --no-cache-dir torch torchvision)) && \
+      pip install --no-cache-dir Cython numpy && \
+      pip install --no-cache-dir git+https://github.com/KaiyangZhou/deep-person-reid.git && \
       pip install --no-cache-dir -r requirements-cpu.txt; \
     fi
 
