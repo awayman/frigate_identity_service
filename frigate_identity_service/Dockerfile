@@ -36,12 +36,7 @@ RUN if [ "$USE_GPU" = "true" ]; then \
 COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py ./
 
 # Pre-download model weights at build time so startup is instant.
-RUN python -c "
-from torchreid.utils import FeatureExtractor
-print('Pre-downloading OSNet (osnet_x1_0) weights...')
-FeatureExtractor(model_name='osnet_x1_0', model_path='', device='cpu')
-print('OSNet weights cached successfully.')
-"
+RUN python -c "from torchreid.utils import FeatureExtractor; print('Pre-downloading OSNet (osnet_x1_0) weights...'); FeatureExtractor(model_name='osnet_x1_0', model_path='', device='cpu'); print('OSNet weights cached successfully.')"
 
 # Startup script (also used as the Home Assistant Add-on entry point)
 COPY run.sh /run.sh
