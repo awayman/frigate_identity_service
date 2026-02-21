@@ -4,4 +4,4 @@
 # the Supervisor and is read automatically by identity_service.py.
 set -e
 
-exec python3 /app/identity_service.py
+exec python3 -u /app/identity_service.py
