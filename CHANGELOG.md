@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-21
+
 ### Changed
 - Pre-built Docker images on GHCR for fast installs (no more local PyTorch builds)
 - Added CI/CD with GitHub Actions
