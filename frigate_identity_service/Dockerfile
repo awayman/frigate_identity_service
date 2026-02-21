@@ -20,6 +20,9 @@ LABEL \
 # GPU deployments: docker build --build-arg USE_GPU=true .
 ARG USE_GPU=false
 
+# Build arg: OSNet model variant to bundle. Change to bundle a different variant.
+ARG REID_MODEL=osnet_x1_0
+
 # Copy requirements files
 COPY requirements.txt requirements-cpu.txt ./
 
@@ -33,8 +36,12 @@ RUN if [ "$USE_GPU" = "true" ]; then \
     fi
 
 # Copy all Python modules
-COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py ./
-# Note: model weights (e.g. OSNet) are downloaded automatically on first startup.
+COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py download_weights.py ./
+
+# Bundle OSNet weights at build time so startup requires no network access.
+# TORCH_HOME is set so torchreid caches into /app/weights inside the image.
+RUN TORCH_HOME=/app/weights python download_weights.py ${REID_MODEL} /app/weights || \
+    echo "WARNING: Weight download failed at build time. Weights will be downloaded at first startup."
 
 # Startup script (also used as the Home Assistant Add-on entry point)
 COPY run.sh /run.sh

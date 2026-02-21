@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 from PIL import Image
 from typing import Optional
 
@@ -39,6 +40,10 @@ TORCHREID_MODELS = {
     "osnet_ibn_x1_0",
     "osnet_ain_x1_0",
 }
+
+# Default directory where bundled weights are stored inside the image.
+# Can be overridden by setting the TORCH_HOME environment variable.
+_DEFAULT_WEIGHTS_DIR = "/app/weights"
 
 
 class ReIDModel:
@@ -101,10 +106,19 @@ class ReIDModel:
 
         Tries to load the requested model via torchreid first.  Falls back
         to a generic ResNet50 feature extractor when torchreid is not
-        available or when the model name is ``resnet50``.
+        available, when the model name is ``resnet50``, or when the torchreid
+        model fails to load.
         """
         if self.model_name in TORCHREID_MODELS and TORCHREID_AVAILABLE:
-            self._load_torchreid_model()
+            try:
+                self._load_torchreid_model()
+                return
+            except Exception as e:
+                print(
+                    f"ERROR: Failed to load torchreid model '{self.model_name}': {e}\n"
+                    "Falling back to ResNet50. Re-ID accuracy will be reduced.\n"
+                    "Check that weights are accessible and torchreid is correctly installed."
+                )
         else:
             if self.model_name in TORCHREID_MODELS and not TORCHREID_AVAILABLE:
                 print(
@@ -112,11 +126,22 @@ class ReIDModel:
                     "Falling back to ResNet50.  Install torchreid for better re-ID accuracy:\n"
                     "  pip install torchreid"
                 )
-            self._load_resnet50_fallback()
+        self._load_resnet50_fallback()
 
     def _load_torchreid_model(self):
-        """Load a torchreid person re-identification model."""
-        print(f"Loading torchreid model: {self.model_name} ...")
+        """Load a torchreid person re-identification model.
+
+        Prefers bundled weights from TORCH_HOME or /app/weights so that no
+        network access is required at runtime.
+        """
+        # Point torchreid's cache at the bundled weights directory so it finds
+        # weights without hitting the network.
+        weights_dir = os.environ.setdefault("TORCH_HOME", _DEFAULT_WEIGHTS_DIR)
+
+        print(
+            f"Loading torchreid model: {self.model_name} "
+            f"(weights dir: {weights_dir}) ..."
+        )
         self._extractor = FeatureExtractor(
             model_name=self.model_name,
             model_path="",
