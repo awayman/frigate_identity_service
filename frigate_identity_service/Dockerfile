@@ -49,10 +49,21 @@ def _make_tb_stub(name):
     mod = types.ModuleType(name)
     mod.__version__ = "2.0.0"   # satisfies the ">= 1.15" version check inside torchreid
     mod.__path__ = []            # makes it look like a package for sub-module imports
+
+    # Auto-create child stubs on attribute access so any tensorboard.* submodule
+    # that torchreid tries to import is handled without enumerating them all.
+    def __getattr__(attr):
+        child_name = f"{name}.{attr}"
+        child = _make_tb_stub(child_name)
+        sys.modules[child_name] = child
+        setattr(mod, attr, child)
+        return child
+
+    mod.__getattr__ = __getattr__
     return mod
 
-for _mod in ("tensorboard", "tensorboard.summary", "tensorboard.summary.writer"):
-    sys.modules.setdefault(_mod, _make_tb_stub(_mod))
+# Only the top-level stub is needed; children are created lazily on demand.
+sys.modules.setdefault("tensorboard", _make_tb_stub("tensorboard"))
 
 try:
     from torchreid.utils import FeatureExtractor
