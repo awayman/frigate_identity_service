@@ -4,6 +4,7 @@ Run with: python -m pytest tests/test_lite.py -v
 """
 
 import json
+import logging
 import pytest
 import tempfile
 import os
@@ -221,7 +222,12 @@ class TestLoadHaOptions:
         )
         module = ast.Module(body=[func_def], type_ignores=[])
         code = compile(module, src_path, "exec")
-        ns = {"os": os, "Path": __import__("pathlib").Path, "json": json}
+        ns = {
+            "os": os,
+            "Path": __import__("pathlib").Path,
+            "json": json,
+            "logger": logging.getLogger("test"),
+        }
         exec(code, ns)
         return ns["load_ha_options"]
 
@@ -337,7 +343,7 @@ class TestConnectWithRetry:
         )
         module = ast.Module(body=[func_def], type_ignores=[])
         code = compile(module, src_path, "exec")
-        ns = {"os": os, "time": __import__("time")}
+        ns = {"os": os, "time": __import__("time"), "logger": logging.getLogger("test")}
         exec(code, ns)
         return ns["connect_with_retry"]
 

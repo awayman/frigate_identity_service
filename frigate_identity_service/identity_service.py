@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from collections import defaultdict, deque
 import os
@@ -11,6 +12,13 @@ from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
 from mqtt_utils import get_mqtt_client
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def load_env_file(env_file_path):
@@ -31,7 +39,7 @@ def load_env_file(env_file_path):
                         if key not in os.environ:
                             os.environ[key] = value
     except Exception as e:
-        print(f"Warning: Failed to load {env_file_path}: {e}")
+        logger.warning("Failed to load %s: %s", env_file_path, e)
 
 
 def load_ha_options(options_file="/data/options.json"):
@@ -55,9 +63,9 @@ def load_ha_options(options_file="/data/options.json"):
             if env_key not in os.environ and value not in (None, ""):
                 os.environ[env_key] = str(value)
 
-        print(f"Loaded Home Assistant Add-on configuration from {options_file}")
+        logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
     except Exception as e:
-        print(f"Warning: Failed to load {options_file}: {e}")
+        logger.warning("Failed to load %s: %s", options_file, e)
 
 
 # Load configuration from Home Assistant Add-on options (if running as HA add-on)
@@ -66,7 +74,7 @@ load_ha_options()
 # Load configuration from .env.integration-test if it exists
 test_env_path = Path(__file__).parent / ".env.integration-test"
 if test_env_path.exists():
-    print(f"Loading configuration from {test_env_path}")
+    logger.info("Loading configuration from %s", test_env_path)
     load_env_file(str(test_env_path))
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
@@ -84,18 +92,18 @@ SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
 
 # Initialize modules
-print("Initializing embedding store...")
+logger.info("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
 
-print(f"Initializing ReID model ({REID_MODEL})...")
+logger.info("Initializing ReID model (%s)...", REID_MODEL)
 device = None if REID_DEVICE == "auto" else REID_DEVICE
 try:
     reid_model = ReIDModel(device=device, model_name=REID_MODEL)
-    print("ReID system ready!")
+    logger.info("ReID system ready!")
     REID_AVAILABLE = True
 except RuntimeError as e:
-    print(f"WARNING: {e}")
-    print(
+    logger.warning("%s", e)
+    logger.warning(
         "ReID matching will be disabled. Only basic temporal tracking will be available."
     )
     reid_model = None
@@ -110,21 +118,28 @@ CACHE_TTL = 60  # seconds
 
 
 def on_connect(client, userdata, flags, rc, properties=None):
-    print(f"Connected to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
-    print(f"Frigate API endpoint: {FRIGATE_HOST}")
+    logger.info("Connected to MQTT Broker at %s:%s", MQTT_BROKER, MQTT_PORT)
+    logger.info("Frigate API endpoint: %s", FRIGATE_HOST)
 
     # Subscribe to tracked object updates (includes face recognition via sub_label)
     client.subscribe("frigate/+/+/update")
-    print("Subscribed to: frigate/+/+/update")
+    logger.info("Subscribed to: frigate/+/+/update")
 
     # Subscribe to person snapshots for fast display
     client.subscribe("frigate/+/person/snapshot")
-    print("Subscribed to: frigate/+/person/snapshot")
+    logger.info("Subscribed to: frigate/+/person/snapshot")
 
     # Optional: Subscribe to car/truck for vehicle detection
     client.subscribe("frigate/+/car/snapshot")
     client.subscribe("frigate/+/truck/snapshot")
-    print("Subscribed to vehicle snapshots")
+    logger.info("Subscribed to vehicle snapshots")
+
+    logger.info(
+        "Frigate Identity Service started successfully (model=%s, device=%s, threshold=%.2f)",
+        REID_MODEL,
+        REID_DEVICE,
+        REID_SIMILARITY_THRESHOLD,
+    )
 
 
 def on_message(client, userdata, msg):
@@ -135,7 +150,7 @@ def on_message(client, userdata, msg):
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
     except Exception as e:
-        print(f"Error processing MQTT message on {msg.topic}: {e}")
+        logger.error("Error processing MQTT message on %s: %s", msg.topic, e)
         traceback.print_exc()
 
 
@@ -170,13 +185,15 @@ def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
 
             return image_base64
         else:
-            print(
-                f"[API] Failed to fetch snapshot for {event_id}: HTTP {response.status_code}"
+            logger.warning(
+                "[API] Failed to fetch snapshot for %s: HTTP %s",
+                event_id,
+                response.status_code,
             )
             return None
 
     except requests.exceptions.RequestException as e:
-        print(f"[API] Error fetching snapshot for {event_id}: {e}")
+        logger.error("[API] Error fetching snapshot for %s: %s", event_id, e)
         return None
 
 
@@ -199,8 +216,13 @@ def publish_identity_event(
 
     # Publish to person-specific topic
     client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
-    print(
-        f"[{source.upper()}] {person_id} at {camera} (zones: {zones}, confidence: {confidence:.3f})"
+    logger.info(
+        "[%s] %s at %s (zones: %s, confidence: %.3f)",
+        source.upper(),
+        person_id,
+        camera,
+        zones,
+        confidence,
     )
 
 
@@ -212,7 +234,7 @@ def handle_tracked_object_update(client, msg):
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
     except json.JSONDecodeError:
-        print(f"[UPDATE] Warning: Could not decode JSON from {msg.topic}")
+        logger.warning("[UPDATE] Could not decode JSON from %s", msg.topic)
         return
 
     camera = payload.get("camera")
@@ -251,9 +273,11 @@ def handle_tracked_object_update(client, msg):
                 embedding_store.store_embedding(
                     person_id, embedding, camera, confidence
                 )
-                print(f"[EMBEDDING] Stored accurate embedding for {person_id}")
+                logger.info("[EMBEDDING] Stored accurate embedding for %s", person_id)
             except Exception as e:
-                print(f"[EMBEDDING] Error storing embedding for {person_id}: {e}")
+                logger.error(
+                    "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
+                )
 
         # Publish identity event (HA doesn't wait for embedding storage)
         publish_identity_event(
@@ -276,7 +300,7 @@ def handle_tracked_object_update(client, msg):
         snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
 
         if not snapshot_base64:
-            print(f"[REID] Could not fetch snapshot for event {event_id}")
+            logger.warning("[REID] Could not fetch snapshot for event %s", event_id)
             return
 
         try:
@@ -302,12 +326,14 @@ def handle_tracked_object_update(client, msg):
                     timestamp,
                 )
             else:
-                print(
-                    f"[REID] No match found for event {event_id} (best score: {similarity_score:.3f})"
+                logger.info(
+                    "[REID] No match found for event %s (best score: %.3f)",
+                    event_id,
+                    similarity_score,
                 )
 
         except Exception as e:
-            print(f"[REID] Error processing event {event_id}: {e}")
+            logger.error("[REID] Error processing event %s: %s", event_id, e)
             traceback.print_exc()
 
 
@@ -339,7 +365,7 @@ def handle_snapshot_for_display(client, msg):
 
         # Store snapshot for HA display
         client.publish(f"identity/snapshots/vehicle_{camera}", image_bytes, retain=True)
-        print(f"[VEHICLE] {object_type} detected at {camera}")
+        logger.info("[VEHICLE] %s detected at %s", object_type, camera)
         return
 
     # Handle person snapshots
@@ -350,8 +376,9 @@ def handle_snapshot_for_display(client, msg):
     recent_detections = camera_person_queue.get(camera, deque())
 
     if not recent_detections:
-        print(
-            f"[SNAPSHOT] Received snapshot from {camera}, but no recent person detection"
+        logger.debug(
+            "[SNAPSHOT] Received snapshot from %s, but no recent person detection",
+            camera,
         )
         return
 
@@ -367,7 +394,7 @@ def handle_snapshot_for_display(client, msg):
                     matched_person = detection
 
     if not matched_person or "person_id" not in matched_person:
-        print(f"[SNAPSHOT] No correlation match found for {camera} snapshot")
+        logger.debug("[SNAPSHOT] No correlation match found for %s snapshot", camera)
         return
 
     person_id = matched_person["person_id"]
@@ -377,8 +404,10 @@ def handle_snapshot_for_display(client, msg):
         confidence_note = "high_confidence"
     elif len(active_persons) > 1:
         confidence_note = "low_confidence_multi_person"
-        print(
-            f"[SNAPSHOT] Warning: {len(active_persons)} persons active on {camera}, snapshot may be mismatched"
+        logger.warning(
+            "[SNAPSHOT] %d persons active on %s, snapshot may be mismatched",
+            len(active_persons),
+            camera,
         )
     else:
         confidence_note = "unknown"
@@ -400,8 +429,11 @@ def handle_snapshot_for_display(client, msg):
         f"identity/snapshots/{person_id}/metadata", json.dumps(snapshot_metadata)
     )
 
-    print(
-        f"[SNAPSHOT-FAST] Published snapshot for {person_id} at {camera} ({confidence_note})"
+    logger.info(
+        "[SNAPSHOT-FAST] Published snapshot for %s at %s (%s)",
+        person_id,
+        camera,
+        confidence_note,
     )
 
 
@@ -423,12 +455,16 @@ def connect_with_retry(client, broker, port, max_attempts, retry_delay):
             client.connect(broker, port, 60)
             return True
         except Exception as e:
-            print(
-                f"Failed to connect to MQTT broker at {broker}:{port} "
-                f"(attempt {attempt}/{max_attempts}): {e}"
+            logger.error(
+                "Failed to connect to MQTT broker at %s:%s (attempt %d/%d): %s",
+                broker,
+                port,
+                attempt,
+                max_attempts,
+                e,
             )
             if attempt < max_attempts:
-                print(f"Retrying in {retry_delay} seconds...")
+                logger.info("Retrying in %d seconds...", retry_delay)
                 time.sleep(retry_delay)
     return False
 
@@ -445,7 +481,8 @@ if connect_with_retry(
 ):
     client.loop_forever()
 else:
-    print(
-        f"Could not connect to MQTT broker after {MQTT_CONNECT_RETRIES} attempts. Exiting."
+    logger.error(
+        "Could not connect to MQTT broker after %d attempts. Exiting.",
+        MQTT_CONNECT_RETRIES,
     )
     raise SystemExit(1)
