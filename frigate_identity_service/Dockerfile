@@ -39,9 +39,4 @@ COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
-# Set default environment variables (can be overridden at runtime)
-ENV MQTT_BROKER=localhost
-ENV MQTT_PORT=1883
-ENV MQTT_TOPIC=identity/person/recognized
-
 CMD ["/run.sh"]

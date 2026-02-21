@@ -248,6 +248,24 @@ class TestLoadHaOptions:
         # Should not raise
         load_ha_options(options_file=str(options_file))
 
+    def test_core_mosquitto_applied_without_preset_env(self, monkeypatch, tmp_path):
+        """core-mosquitto is applied when MQTT_BROKER is not pre-set by Docker ENV.
+
+        Regression test: the Dockerfile must NOT set ENV MQTT_BROKER=localhost
+        because that would prevent load_ha_options from applying the user's
+        mqtt_broker = core-mosquitto option.
+        """
+        load_ha_options = self._get_load_ha_options()
+        monkeypatch.delenv("MQTT_BROKER", raising=False)
+
+        options = {"mqtt_broker": "core-mosquitto"}
+        options_file = tmp_path / "options.json"
+        options_file.write_text(json.dumps(options))
+
+        load_ha_options(options_file=str(options_file))
+
+        assert os.environ["MQTT_BROKER"] == "core-mosquitto"
+
 
 class TestConnectWithRetry:
     """Tests for the connect_with_retry function."""
