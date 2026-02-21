@@ -12,6 +12,27 @@ Lightweight ReID service that provides person identification continuity for Frig
   - Frigate facial recognition (primary, highest confidence)
   - ReID model matching (continuity when face not visible)
 
+**ReID Model Selection:**
+
+The service uses [torchreid](https://github.com/KaiyangZhou/deep-person-reid) to load
+dedicated person re-identification models such as OSNet.  Set the `REID_MODEL`
+environment variable (or the `reid_model` option in `config.yaml`) to choose
+a model:
+
+| Model | Embedding dim | Notes |
+|-------|--------------|-------|
+| `osnet_x1_0` (default) | 512 | Best accuracy, recommended |
+| `osnet_x0_75` | 512 | Lighter variant |
+| `osnet_x0_5` | 512 | Lighter variant |
+| `osnet_x0_25` | 512 | Lightest OSNet |
+| `osnet_ibn_x1_0` | 512 | OSNet + Instance Batch Norm |
+| `osnet_ain_x1_0` | 512 | OSNet + Attention Instance Norm |
+| `resnet50` | 2048 | Generic ImageNet fallback (no torchreid required) |
+
+If torchreid is not installed and a torchreid model is requested, the service
+automatically falls back to ResNet50.  Both GPU (`cuda`) and CPU-only modes are
+fully supported.
+
 **Environment Variables:**
 
 | Variable | Default | Description |
@@ -21,7 +42,7 @@ Lightweight ReID service that provides person identification continuity for Frig
 | `MQTT_USERNAME` | (optional) | MQTT authentication username |
 | `MQTT_PASSWORD` | (optional) | MQTT authentication password |
 | `FRIGATE_HOST` | `http://localhost:5000` | Frigate HTTP API endpoint |
-| `REID_MODEL` | `osnet_x1_0` | ReID model name (timm compatible) |
+| `REID_MODEL` | `osnet_x1_0` | ReID model name (`osnet_x1_0`, `osnet_x0_75`, `osnet_x0_5`, `osnet_x0_25`, `osnet_ibn_x1_0`, `osnet_ain_x1_0`, or `resnet50`) |
 | `REID_DEVICE` | `auto` | Device for ReID (`auto`, `cuda`, `cpu`) |
 | `REID_SIMILARITY_THRESHOLD` | `0.6` | Minimum similarity score for ReID match |
 | `EMBEDDINGS_DB_PATH` | `embeddings.json` | Path to store person embeddings |
