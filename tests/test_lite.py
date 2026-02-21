@@ -153,37 +153,35 @@ class TestServices:
 class TestReIDModelSelection:
     """Tests for configurable model selection in reid_model.py."""
 
-    def _read_source(self):
-        src_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "frigate_identity_service",
-            "reid_model.py",
-        )
-        with open(src_path) as f:
-            return f.read()
-
     def test_torchreid_models_defined(self):
-        """TORCHREID_MODELS set is defined and contains osnet_x1_0."""
-        source = self._read_source()
-        assert "TORCHREID_MODELS" in source
-        assert "osnet_x1_0" in source
+        """TORCHREID_MODELS set is defined and contains expected models."""
+        from reid_model import TORCHREID_MODELS
 
-    def test_model_name_parameter(self):
+        assert isinstance(TORCHREID_MODELS, set)
+        assert "osnet_x1_0" in TORCHREID_MODELS
+        assert "osnet_x0_25" in TORCHREID_MODELS
+        assert "osnet_ibn_x1_0" in TORCHREID_MODELS
+
+    def test_model_name_parameter_in_init(self):
         """ReIDModel.__init__ accepts a model_name parameter."""
-        source = self._read_source()
-        assert "model_name" in source
+        import inspect
+        from reid_model import ReIDModel
 
-    def test_torchreid_import_guard(self):
-        """torchreid is imported with a try/except guard."""
-        source = self._read_source()
-        assert "TORCHREID_AVAILABLE" in source
-        assert "from torchreid" in source
+        sig = inspect.signature(ReIDModel.__init__)
+        assert "model_name" in sig.parameters
+        assert sig.parameters["model_name"].default == "osnet_x1_0"
+
+    def test_torchreid_availability_flag(self):
+        """TORCHREID_AVAILABLE flag is defined as a boolean."""
+        from reid_model import TORCHREID_AVAILABLE
+
+        assert isinstance(TORCHREID_AVAILABLE, bool)
 
     def test_resnet50_fallback_exists(self):
-        """The ResNet50 fallback path is still present."""
-        source = self._read_source()
-        assert "_load_resnet50_fallback" in source
-        assert "resnet50" in source
+        """The ResNet50 fallback method is present on ReIDModel."""
+        from reid_model import ReIDModel
+
+        assert hasattr(ReIDModel, "_load_resnet50_fallback")
 
     def test_identity_service_reads_reid_model_env(self):
         """identity_service.py reads the REID_MODEL environment variable."""
