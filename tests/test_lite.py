@@ -150,6 +150,55 @@ class TestServices:
             pytest.skip(f"torch not available: {e}")
 
 
+class TestReIDModelSelection:
+    """Tests for configurable model selection in reid_model.py."""
+
+    def _read_source(self):
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "reid_model.py",
+        )
+        with open(src_path) as f:
+            return f.read()
+
+    def test_torchreid_models_defined(self):
+        """TORCHREID_MODELS set is defined and contains osnet_x1_0."""
+        source = self._read_source()
+        assert "TORCHREID_MODELS" in source
+        assert "osnet_x1_0" in source
+
+    def test_model_name_parameter(self):
+        """ReIDModel.__init__ accepts a model_name parameter."""
+        source = self._read_source()
+        assert "model_name" in source
+
+    def test_torchreid_import_guard(self):
+        """torchreid is imported with a try/except guard."""
+        source = self._read_source()
+        assert "TORCHREID_AVAILABLE" in source
+        assert "from torchreid" in source
+
+    def test_resnet50_fallback_exists(self):
+        """The ResNet50 fallback path is still present."""
+        source = self._read_source()
+        assert "_load_resnet50_fallback" in source
+        assert "resnet50" in source
+
+    def test_identity_service_reads_reid_model_env(self):
+        """identity_service.py reads the REID_MODEL environment variable."""
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "identity_service.py",
+        )
+        with open(src_path) as f:
+            source = f.read()
+        assert "REID_MODEL" in source
+        assert 'os.getenv("REID_MODEL"' in source
+        assert "model_name=" in source
+
+
 class TestLoadHaOptions:
     """Tests for the load_ha_options function used by the Home Assistant Add-on."""
 

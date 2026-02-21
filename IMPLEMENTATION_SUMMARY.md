@@ -123,7 +123,7 @@ python identity_service.py
 Expected output:
 ```
 Initializing embedding store...
-Initializing ReID model: osnet_x1_0
+Initializing ReID model (osnet_x1_0)...
 ReID system ready!
 Connected to MQTT Broker at localhost:1883
 Frigate API endpoint: http://localhost:5000

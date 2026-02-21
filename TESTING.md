@@ -50,7 +50,7 @@ python identity_service.py
 You should see:
 ```
 Initializing embedding store...
-Initializing ReID model: osnet_x1_0
+Initializing ReID model (osnet_x1_0)...
 ReID system ready!
 Connected to MQTT Broker at localhost:1883
 ```
