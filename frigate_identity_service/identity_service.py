@@ -20,6 +20,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# TODO: After code is stable, review logging levels and reduce INFO verbosity
+# Currently many detection/event logs are at INFO for debugging the MQTT integration.
+# Consider demoting non-critical events to DEBUG level for production use.
+
 
 def load_env_file(env_file_path):
     """Load environment variables from a .env file."""
