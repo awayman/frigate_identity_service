@@ -7,7 +7,6 @@ image: "ghcr.io/awayman/frigate-identity-service-{arch}"
 arch:
   - amd64
   - aarch64
-  - armv7
 startup: services
 boot: auto
 options:
