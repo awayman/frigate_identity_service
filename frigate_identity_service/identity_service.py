@@ -8,6 +8,8 @@ import requests
 import base64
 from pathlib import Path
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
@@ -587,12 +589,35 @@ def connect_with_retry(client, broker, port, max_attempts, retry_delay):
     return False
 
 
+def schedule_nightly_embedding_cleanup():
+    """Start a background scheduler that clears all embeddings at midnight.
+
+    This ensures the ReID database only contains embeddings from the current
+    day, preventing stale appearance data from causing false matches.
+    Frigate facial recognition will repopulate the store throughout each day.
+    """
+    scheduler = BackgroundScheduler()
+
+    def _clear_embeddings():
+        logger.info("[CLEANUP] Nightly cleanup: clearing all embeddings for daily refresh")
+        embedding_store.clear()
+        logger.info("[CLEANUP] Embedding store cleared. Store will rebuild as people are seen today.")
+
+    scheduler.add_job(_clear_embeddings, "cron", hour=0, minute=0)
+    scheduler.start()
+    logger.info("[SCHEDULER] Nightly embedding cleanup scheduled (runs at midnight)")
+    return scheduler
+
+
 client = get_mqtt_client()
 client.on_connect = on_connect
 client.on_message = on_message
 
 if MQTT_USERNAME:
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+
+# Start the nightly cleanup scheduler before entering the MQTT loop
+scheduler = schedule_nightly_embedding_cleanup()
 
 if connect_with_retry(
     client, MQTT_BROKER, MQTT_PORT, MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY
