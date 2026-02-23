@@ -2,7 +2,6 @@
 .env
 .env.integration-test
 embeddings.json
-persons.yaml
 config.json
 
 # Model weights (bundled at build time, not committed to git)
