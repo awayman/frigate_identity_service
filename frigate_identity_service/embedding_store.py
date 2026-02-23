@@ -65,6 +65,9 @@ class EmbeddingStore:
     def _save(self):
         """Save embeddings to disk."""
         try:
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+            
             serializable = {}
             for person_id, embeddings_list in self.embeddings.items():
                 serializable[person_id] = []

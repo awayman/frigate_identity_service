@@ -93,7 +93,20 @@ FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
-EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", "embeddings.json")
+
+
+def get_default_embeddings_path():
+    """Return container-appropriate default path for embeddings.
+    
+    When running in a container, defaults to /data/embeddings.json for persistence.
+    Otherwise uses embeddings.json in the current directory.
+    """
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return "/data/embeddings.json"
+    return "embeddings.json"
+
+
+EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", get_default_embeddings_path())
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
 

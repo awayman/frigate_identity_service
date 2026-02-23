@@ -102,14 +102,34 @@ Build and run the container (CPU-only, suitable for most deployments):
 
 ```bash
 docker build -t frigate-identity .
-docker run --env MQTT_BROKER=host.docker.internal --env MQTT_PORT=1883 frigate-identity
+docker run \
+  -v $(pwd)/data:/data \
+  --env MQTT_BROKER=host.docker.internal \
+  --env MQTT_PORT=1883 \
+  frigate-identity
 ```
+
+**Important:** Mount a volume to `/data` to persist embeddings across container restarts. Without the volume, learned identities will be lost when the container stops.
 
 To build with GPU (CUDA) support:
 
 ```bash
 docker build --build-arg USE_GPU=true -t frigate-identity-gpu .
-docker run --gpus all --env MQTT_BROKER=host.docker.internal --env MQTT_PORT=1883 frigate-identity-gpu
+docker run \
+  --gpus all \
+  -v $(pwd)/data:/data \
+  --env MQTT_BROKER=host.docker.internal \
+  --env MQTT_PORT=1883 \
+  frigate-identity-gpu
+```
+
+**Configuration:** You can override the embeddings path with `EMBEDDINGS_DB_PATH`:
+```bash
+docker run \
+  -v /my/custom/path:/persistent \
+  --env EMBEDDINGS_DB_PATH=/persistent/my-embeddings.json \
+  --env MQTT_BROKER=host.docker.internal \
+  frigate-identity
 ```
 
 **Home Assistant Add-on**
