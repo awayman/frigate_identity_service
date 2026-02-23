@@ -37,7 +37,9 @@ class EmbeddingStore:
                     data = json.load(f)
                 self.embeddings = self._migrate_to_new_format(data)
                 total = sum(len(v) for v in self.embeddings.values())
-                print(f"Loaded {len(self.embeddings)} persons ({total} total embeddings) from embedding store")
+                print(
+                    f"Loaded {len(self.embeddings)} persons ({total} total embeddings) from embedding store"
+                )
             except Exception as e:
                 print(f"Error loading embeddings from {self.db_path}: {e}")
                 self.embeddings = {}
@@ -54,12 +56,14 @@ class EmbeddingStore:
                 migrated[person_id] = entry
             elif isinstance(entry, dict) and "embedding" in entry:
                 # Old format: single embedding dict — wrap in a list
-                migrated[person_id] = [{
-                    "embedding": entry["embedding"],
-                    "camera": entry.get("camera", "unknown"),
-                    "timestamp": entry.get("timestamp", datetime.now().isoformat()),
-                    "confidence": entry.get("confidence", 0.0),
-                }]
+                migrated[person_id] = [
+                    {
+                        "embedding": entry["embedding"],
+                        "camera": entry.get("camera", "unknown"),
+                        "timestamp": entry.get("timestamp", datetime.now().isoformat()),
+                        "confidence": entry.get("confidence", 0.0),
+                    }
+                ]
         return migrated
 
     def _save(self):
@@ -67,7 +71,7 @@ class EmbeddingStore:
         try:
             # Ensure parent directory exists
             os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-            
+
             serializable = {}
             for person_id, embeddings_list in self.embeddings.items():
                 serializable[person_id] = []
@@ -77,12 +81,14 @@ class EmbeddingStore:
                         embedding = embedding.tolist()
                     elif not isinstance(embedding, list):
                         embedding = list(embedding)
-                    serializable[person_id].append({
-                        "embedding": embedding,
-                        "camera": emb_entry["camera"],
-                        "timestamp": emb_entry["timestamp"],
-                        "confidence": emb_entry["confidence"],
-                    })
+                    serializable[person_id].append(
+                        {
+                            "embedding": embedding,
+                            "camera": emb_entry["camera"],
+                            "timestamp": emb_entry["timestamp"],
+                            "confidence": emb_entry["confidence"],
+                        }
+                    )
 
             with open(self.db_path, "w") as f:
                 json.dump(serializable, f)
@@ -119,11 +125,15 @@ class EmbeddingStore:
         else:
             self.embeddings[person_id].insert(0, new_entry)
             # Trim to max allowed
-            self.embeddings[person_id] = self.embeddings[person_id][:self.MAX_EMBEDDINGS_PER_PERSON]
+            self.embeddings[person_id] = self.embeddings[person_id][
+                : self.MAX_EMBEDDINGS_PER_PERSON
+            ]
 
         self._save()
 
-    def get_all_embeddings(self) -> Dict[str, List[Tuple[Union[List, Any], str, float, str]]]:
+    def get_all_embeddings(
+        self,
+    ) -> Dict[str, List[Tuple[Union[List, Any], str, float, str]]]:
         """Get all stored embeddings with timestamps for recency weighting.
 
         Returns:
@@ -138,12 +148,14 @@ class EmbeddingStore:
                 embedding = emb_entry["embedding"]
                 if isinstance(embedding, list) and np is not None:
                     embedding = np.array(embedding)
-                result[person_id].append((
-                    embedding,
-                    emb_entry["camera"],
-                    emb_entry["confidence"],
-                    emb_entry["timestamp"],
-                ))
+                result[person_id].append(
+                    (
+                        embedding,
+                        emb_entry["camera"],
+                        emb_entry["confidence"],
+                        emb_entry["timestamp"],
+                    )
+                )
         return result
 
     def get_embedding(self, person_id: str) -> Optional[Union[List, Any]]:

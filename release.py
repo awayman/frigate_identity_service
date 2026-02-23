@@ -77,7 +77,13 @@ def get_commits_since_last_tag() -> list[str]:
         else:
             # Get commits since last tag
             commits_output = run(
-                ["git", "log", f"{last_tag}..HEAD", "--no-merges", "--pretty=format:%s"],
+                [
+                    "git",
+                    "log",
+                    f"{last_tag}..HEAD",
+                    "--no-merges",
+                    "--pretty=format:%s",
+                ],
                 capture=True,
             )
     except Exception:
@@ -167,8 +173,10 @@ def update_changelog(new_version: str) -> None:
         new_version_section += "\n"
         for category in ["Added", "Fixed", "Changed", "Removed"]:
             if categories[category]:
-                new_version_section += f"\n### {category}\n" + "\n".join(categories[category])
-    
+                new_version_section += f"\n### {category}\n" + "\n".join(
+                    categories[category]
+                )
+
     # Replace [Unreleased] with new version and add fresh [Unreleased] section
     new_header = f"## [Unreleased]\n\n{new_version_section}"
     updated = text.replace("## [Unreleased]", new_header, 1)

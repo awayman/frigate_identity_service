@@ -26,8 +26,12 @@ class EmbeddingMatcher:
         Decays linearly from 1.0 (just captured) to 0.5 at RECENCY_DECAY_HOURS.
         """
         try:
-            age_hours = (datetime.now() - datetime.fromisoformat(timestamp_str)).total_seconds() / 3600
-            return max(0.5, 1.0 - age_hours / (EmbeddingMatcher.RECENCY_DECAY_HOURS * 2))
+            age_hours = (
+                datetime.now() - datetime.fromisoformat(timestamp_str)
+            ).total_seconds() / 3600
+            return max(
+                0.5, 1.0 - age_hours / (EmbeddingMatcher.RECENCY_DECAY_HOURS * 2)
+            )
         except Exception:
             return 0.8
 
@@ -35,8 +39,8 @@ class EmbeddingMatcher:
     def _best_similarity_for_person(
         query_embedding: Union[List, Any],
         embeddings_data: Union[
-            List[Tuple],   # new: [(emb, camera, conf, ts), ...]
-            Tuple,         # old: (emb, camera, conf)
+            List[Tuple],  # new: [(emb, camera, conf, ts), ...]
+            Tuple,  # old: (emb, camera, conf)
         ],
     ) -> float:
         """Return the best recency-weighted similarity for a single person."""

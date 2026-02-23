@@ -97,7 +97,7 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 
 def get_default_embeddings_path():
     """Return container-appropriate default path for embeddings.
-    
+
     When running in a container, defaults to /data/embeddings.json for persistence.
     Otherwise uses embeddings.json in the current directory.
     """
@@ -443,10 +443,10 @@ def handle_tracked_object_update(client, msg):
         if snapshot_base64 and REID_AVAILABLE:
             try:
                 embedding = reid_model.extract_embedding(snapshot_base64)
-                embedding_store.store_embedding(
-                    person_id, embedding, camera, score
+                embedding_store.store_embedding(person_id, embedding, camera, score)
+                logger.info(
+                    "[EMBEDDING] Stored embedding from face update for %s", person_id
                 )
-                logger.info("[EMBEDDING] Stored embedding from face update for %s", person_id)
             except Exception as e:
                 logger.error(
                     "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
@@ -612,9 +612,13 @@ def schedule_nightly_embedding_cleanup():
     scheduler = BackgroundScheduler()
 
     def _clear_embeddings():
-        logger.info("[CLEANUP] Nightly cleanup: clearing all embeddings for daily refresh")
+        logger.info(
+            "[CLEANUP] Nightly cleanup: clearing all embeddings for daily refresh"
+        )
         embedding_store.clear()
-        logger.info("[CLEANUP] Embedding store cleared. Store will rebuild as people are seen today.")
+        logger.info(
+            "[CLEANUP] Embedding store cleared. Store will rebuild as people are seen today."
+        )
 
     scheduler.add_job(_clear_embeddings, "cron", hour=0, minute=0)
     scheduler.start()
