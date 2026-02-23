@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-23
+
+### Added
+- remove persons.yaml from .gitignore
+- enhance embeddings configuration for container support and persistence
+- add functions to retrieve and categorize commits since last tag for changelog updates
+
 ## [0.3.0] - 2026-02-22
 
 ## [0.2.21] - 2026-02-21
