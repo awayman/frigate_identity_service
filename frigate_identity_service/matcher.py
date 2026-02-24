@@ -17,7 +17,7 @@ class EmbeddingMatcher:
     """
 
     # After this many hours, an embedding's weight levels off at 0.5
-    RECENCY_DECAY_HOURS = 24
+    RECENCY_DECAY_HOURS = 12
 
     @staticmethod
     def _recency_weight(timestamp_str: str) -> float:
