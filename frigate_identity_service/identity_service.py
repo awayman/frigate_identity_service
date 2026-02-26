@@ -14,6 +14,7 @@ from embedding_store import EmbeddingStore
 from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
 from mqtt_utils import get_mqtt_client
+from debug_logger import DebugLogger
 
 logging.basicConfig(
     level=logging.INFO,
@@ -110,6 +111,23 @@ EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", get_default_embeddings_path
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
 
+
+def get_default_debug_path():
+    """Return container-appropriate default path for debug logging.
+
+    When running in a container, defaults to /data/debug for persistence.
+    Otherwise uses ./debug in the current directory.
+    """
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return "/data/debug"
+    return "debug"
+
+
+DEBUG_LOGGING_ENABLED = os.getenv("DEBUG_LOGGING_ENABLED", "false").lower() == "true"
+DEBUG_LOG_PATH = os.getenv("DEBUG_LOG_PATH", get_default_debug_path())
+DEBUG_SAVE_EMBEDDINGS = os.getenv("DEBUG_SAVE_EMBEDDINGS", "false").lower() == "true"
+DEBUG_RETENTION_DAYS = int(os.getenv("DEBUG_RETENTION_DAYS", "7"))
+
 # Initialize modules
 logger.info("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
@@ -127,6 +145,15 @@ except RuntimeError as e:
     )
     reid_model = None
     REID_AVAILABLE = False
+
+# Initialize debug logger
+logger.info("Initializing debug logger at %s...", DEBUG_LOG_PATH)
+debug_logger = DebugLogger(
+    debug_path=DEBUG_LOG_PATH,
+    enabled=DEBUG_LOGGING_ENABLED,
+    save_embeddings=DEBUG_SAVE_EMBEDDINGS,
+    retention_days=DEBUG_RETENTION_DAYS,
+)
 
 # Track recent person detections per camera for snapshot correlation
 camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_CAMERA))
@@ -159,6 +186,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate/+/truck/snapshot")
     logger.info("Subscribed to vehicle snapshots")
 
+    # Subscribe to debug control commands
+    client.subscribe("frigate_identity/debug/set")
+    logger.info("Subscribed to: frigate_identity/debug/set")
+
     logger.info(
         "Frigate Identity Service started successfully (model=%s, device=%s, threshold=%.2f)",
         REID_MODEL,
@@ -174,11 +205,45 @@ def on_message(client, userdata, msg):
             handle_frigate_event(client, msg)
         elif msg.topic == "frigate/tracked_object_update":
             handle_tracked_object_update(client, msg)
+        elif msg.topic == "frigate_identity/debug/set":
+            handle_debug_control(client, msg)
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
     except Exception as e:
         logger.error("Error processing MQTT message on %s: %s", msg.topic, e)
         traceback.print_exc()
+
+
+def handle_debug_control(client, msg):
+    """
+    Handle debug mode control messages from Home Assistant.
+
+    Payload: {"enabled": true/false}
+    Publishes state to: frigate_identity/debug/state
+    """
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+        enabled = payload.get("enabled", False)
+
+        debug_logger.set_enabled(enabled)
+
+        # Publish current state
+        state_message = {"enabled": debug_logger.enabled, "path": DEBUG_LOG_PATH}
+        client.publish(
+            "frigate_identity/debug/state",
+            json.dumps(state_message),
+            retain=True,
+        )
+
+        logger.info(
+            "[DEBUG] Debug logging toggled: %s",
+            "ENABLED" if enabled else "DISABLED",
+        )
+
+    except json.JSONDecodeError:
+        logger.warning("[DEBUG] Invalid JSON in debug control message")
+    except Exception as e:
+        logger.error("[DEBUG] Error handling debug control: %s", e)
 
 
 def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
@@ -331,6 +396,17 @@ def handle_frigate_event(client, msg):
                     person_id, embedding, camera, confidence
                 )
                 logger.info("[EMBEDDING] Stored accurate embedding for %s", person_id)
+
+                # Log to debug logger for analysis
+                debug_logger.log_facial_recognition(
+                    event_id=event_id,
+                    snapshot_base64=snapshot_base64,
+                    person_id=person_id,
+                    camera=camera,
+                    confidence=confidence,
+                    zones=current_zones,
+                    timestamp=timestamp,
+                )
             except Exception as e:
                 logger.error(
                     "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
@@ -372,6 +448,21 @@ def handle_frigate_event(client, msg):
                 detection_record["person_id"] = person_id
                 camera_person_queue[camera].append(detection_record)
 
+                # Log to debug logger for analysis
+                top_matches = EmbeddingMatcher.find_top_matches(
+                    query_embedding, stored_embeddings, top_k=5
+                )
+                debug_logger.log_reid_match(
+                    event_id=event_id,
+                    snapshot_base64=snapshot_base64,
+                    matches=top_matches,
+                    chosen_person_id=person_id,
+                    chosen_similarity=similarity_score,
+                    camera=camera,
+                    zones=current_zones,
+                    timestamp=timestamp,
+                )
+
                 publish_identity_event(
                     client,
                     person_id,
@@ -383,6 +474,21 @@ def handle_frigate_event(client, msg):
                     timestamp,
                 )
             else:
+                # Log no-match for debugging
+                top_matches = EmbeddingMatcher.find_top_matches(
+                    query_embedding, stored_embeddings, top_k=5
+                )
+                debug_logger.log_reid_no_match(
+                    event_id=event_id,
+                    snapshot_base64=snapshot_base64,
+                    matches=top_matches,
+                    best_similarity=similarity_score,
+                    threshold=REID_SIMILARITY_THRESHOLD,
+                    camera=camera,
+                    zones=current_zones,
+                    timestamp=timestamp,
+                )
+
                 logger.info(
                     "[REID] No match found for event %s (best score: %.3f)",
                     event_id,
@@ -542,6 +648,22 @@ def handle_snapshot_for_display(client, msg):
             len(active_persons),
             camera,
         )
+
+        # Log multi-person correlation issue for debugging
+        queue_state = [
+            {
+                "person_id": d.get("person_id", "unknown"),
+                "timestamp": d.get("timestamp", 0),
+                "zones": d.get("zones", []),
+            }
+            for d in list(recent_detections)
+        ]
+        debug_logger.log_correlation_issue(
+            camera=camera,
+            active_persons_count=len(active_persons),
+            queue_state=queue_state,
+            timestamp=now,
+        )
     else:
         confidence_note = "unknown"
 
@@ -620,9 +742,20 @@ def schedule_nightly_embedding_cleanup():
             "[CLEANUP] Embedding store cleared. Store will rebuild as people are seen today."
         )
 
+    def _cleanup_debug_logs():
+        logger.info("[CLEANUP] Running debug log retention cleanup...")
+        deleted_count = debug_logger.cleanup_old_logs()
+        if deleted_count > 0:
+            logger.info(
+                "[CLEANUP] Debug log cleanup completed: %d days of logs removed",
+                deleted_count,
+            )
+
     scheduler.add_job(_clear_embeddings, "cron", hour=0, minute=0)
+    scheduler.add_job(_cleanup_debug_logs, "cron", hour=1, minute=0)
     scheduler.start()
     logger.info("[SCHEDULER] Nightly embedding cleanup scheduled (runs at midnight)")
+    logger.info("[SCHEDULER] Debug log cleanup scheduled (runs at 01:00)")
     return scheduler
 
 

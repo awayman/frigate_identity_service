@@ -48,6 +48,10 @@ fully supported.
 | `EMBEDDINGS_DB_PATH` | `embeddings.json` | Path to store person embeddings |
 | `SNAPSHOT_CORRELATION_WINDOW` | `2.0` | Seconds to correlate MQTT snapshots to persons |
 | `MAX_TRACKED_PERSONS_PER_CAMERA` | `3` | Max persons tracked per camera for correlation |
+| `DEBUG_LOGGING_ENABLED` | `false` | Enable debug logging for misidentification analysis |
+| `DEBUG_LOG_PATH` | `debug/` (or `/data/debug` in container) | Path to store debug logs and snapshots |
+| `DEBUG_SAVE_EMBEDDINGS` | `false` | Include full embeddings in debug JSON (high storage) |
+| `DEBUG_RETENTION_DAYS` | `7` | How many days to retain debug logs before auto-delete |
 
 **MQTT Topics:**
 
@@ -146,7 +150,54 @@ Configuration is written by the Supervisor to `/data/options.json` and is read a
 
 > **Note:** GPU acceleration is not available in Home Assistant Add-on deployments.  The ReID model runs on CPU, which is sufficient for most home use cases.  For GPU-accelerated deployments, use the standalone Docker image built with `--build-arg USE_GPU=true`.
 
-**Development / VS Code**
+**Debug Logging**
+
+If you experience misidentifications, debug logging helps diagnose whether issues stem from Frigate's facial recognition or the ReID model.
+
+**Enable Debug Logging:**
+
+Via environment variable:
+```bash
+DEBUG_LOGGING_ENABLED=true
+DEBUG_LOG_PATH=/data/debug
+DEBUG_SAVE_EMBEDDINGS=false
+DEBUG_RETENTION_DAYS=7
+```
+
+Via Home Assistant Add-on UI or MQTT:
+```bash
+mosquitto_pub -t frigate_identity/debug/set -m '{"enabled": true}'
+```
+
+**Storage:**
+- Snapshots: `/data/debug/snapshots/{date}/`
+- Logs: `/data/debug/logs/{date}_*.jsonl` (JSONL format for easy parsing)
+- Automatic cleanup: Logs older than `DEBUG_RETENTION_DAYS` are deleted daily at 1 AM
+
+**Logs Generated:**
+- `{date}_facial_recognition.jsonl` - Frigate facial recognition events with snapshots
+- `{date}_reid_matches.jsonl` - ReID matching results (successful and failed matches)
+- `{date}_correlation_issues.jsonl` - MQTT snapshot correlation warnings (multi-person scenarios)
+
+**Analyze Logs:**
+
+```bash
+python analyze_debug_logs.py \
+  --debug-path /data/debug \
+  --start-date 2026-02-25 \
+  --output-dir ./reports
+```
+
+Output:
+- `reports/report.html` - Interactive HTML report with metrics and visualizations
+- `reports/summary.csv` - All events in CSV format for spreadsheet analysis
+- `reports/metrics.json` - Aggregated statistics
+
+**Dashboard Example:**
+
+The [examples/debug_dashboard.yaml](examples/debug_dashboard.yaml) provides a Home Assistant dashboard for managing debug mode and analyzing results. Import it via Home Assistant's dashboard editor.
+
+
 
 - Select the workspace interpreter (Command Palette → "Python: Select Interpreter") and choose the `.venv` interpreter.
 - If the editor still flags imports, reload the window or restart the Python language server.

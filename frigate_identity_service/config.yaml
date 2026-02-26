@@ -21,6 +21,10 @@ options:
   embeddings_db_path: "/data/embeddings.json"
   snapshot_correlation_window: 2.0
   max_tracked_persons_per_camera: 3
+  debug_logging_enabled: false
+  debug_log_path: "/data/debug"
+  debug_save_embeddings: false
+  debug_retention_days: 7
 schema:
   mqtt_broker: str
   mqtt_port: int
@@ -33,5 +37,9 @@ schema:
   embeddings_db_path: str
   snapshot_correlation_window: float
   max_tracked_persons_per_camera: int
+  debug_logging_enabled: bool
+  debug_log_path: str
+  debug_save_embeddings: bool
+  debug_retention_days: int
 map:
   - data:rw

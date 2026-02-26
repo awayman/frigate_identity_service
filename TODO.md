@@ -59,6 +59,17 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Publish composite scores in identity events
 - [ ] Different thresholds for facial vs ReID vs continuity
 
+### Matcher Refactor — Vectorized Matching & Tests
+- [ ] Ensure embeddings are L2-normalized at extraction (`reid_model.extract_embedding`)
+- [ ] Build per-person embedding matrices and recency weight vectors
+- [ ] Replace per-pair scipy loops with NumPy vectorized dot-products for matching
+- [ ] Preserve per-embedding recency weighting (max over weighted similarities)
+- [ ] Add unit tests validating equivalence between loop and vectorized implementations
+- [ ] Add performance/benchmark tests for large galleries (e.g., 1k+ embeddings)
+- [ ] Expose `RECENCY_DECAY_HOURS` as runtime/configurable parameter
+- [ ] Keep scipy fallback when NumPy unavailable
+- [ ] Document matching assumptions in `IMPLEMENTATION_SUMMARY.md`
+
 ### Time-Based Confidence Decay
 - [ ] Track timestamp of last detection per person
 - [ ] Reduce confidence 10% per minute after 5 minutes unseen
