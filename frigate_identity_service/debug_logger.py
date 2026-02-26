@@ -58,10 +58,6 @@ class DebugLogger:
         self.snapshots_dir = self.debug_path / "snapshots"
         self.logs_dir = self.debug_path / "logs"
 
-        # Create directories if they don't exist
-        self.snapshots_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
-
         # Persistent state file to survive restarts
         self.state_file = self.debug_path / "enabled"
 
@@ -74,13 +70,21 @@ class DebugLogger:
                 logger.warning(f"[DEBUG] Could not load state file: {e}")
 
         if self.enabled:
+            self._ensure_dirs()
             logger.info(f"[DEBUG] Debug logging ENABLED at {self.debug_path}")
         else:
             logger.info(f"[DEBUG] Debug logging disabled (base path: {self.debug_path})")
 
+    def _ensure_dirs(self):
+        """Create debug directories if they don't exist."""
+        self.snapshots_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
     def set_enabled(self, enabled: bool):
         """Enable or disable debug logging and persist state."""
         self.enabled = enabled
+        if enabled:
+            self._ensure_dirs()
         try:
             self.state_file.write_text(str(enabled).lower())
             logger.info(f"[DEBUG] Debug logging {'ENABLED' if enabled else 'DISABLED'}")
