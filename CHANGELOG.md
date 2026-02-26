@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-26
+
+### Fixed
+- update Python base image to 3.12 and add debug logger to Dockerfile
+
 ## [0.4.0] - 2026-02-26
 
 ### Fixed
