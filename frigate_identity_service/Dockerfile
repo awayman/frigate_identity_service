@@ -1,4 +1,4 @@
-ARG BUILD_FROM=python:3.11-slim-bookworm
+ARG BUILD_FROM=python:3.12-slim-bookworm
 FROM ${BUILD_FROM}
 
 WORKDIR /app
@@ -50,7 +50,7 @@ RUN if [ "$USE_GPU" = "true" ]; then \
     fi
 
 # Copy all Python modules
-COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py download_weights.py ./
+COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py download_weights.py debug_logger.py ./
 
 # Bundle OSNet weights at build time so startup requires no network access.
 # TORCH_HOME is set so torchreid caches into /app/weights inside the image.
@@ -60,5 +60,13 @@ RUN TORCH_HOME=/app/weights python download_weights.py ${REID_MODEL} /app/weight
 # Startup script (also used as the Home Assistant Add-on entry point)
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
+
+# Create non-root user for runtime security
+RUN groupadd -r frigate && useradd -r -g frigate frigate && \
+    chown -R frigate:frigate /app && \
+    chmod 755 /app
+
+# Switch to non-root user
+USER frigate
 
 CMD ["/run.sh"]
