@@ -417,5 +417,53 @@ class TestConnectWithRetry:
         )
 
 
+class TestDebugLoggerInit:
+    """Tests for DebugLogger initialization fix (no dir creation when disabled)."""
+
+    def test_disabled_does_not_create_dirs(self, tmp_path):
+        """DebugLogger with enabled=False must not create debug directories."""
+        from debug_logger import DebugLogger
+
+        non_existent = tmp_path / "nonexistent" / "debug"
+        DebugLogger(debug_path=str(non_existent), enabled=False)
+
+        assert not non_existent.exists(), "Directories must not be created when disabled"
+
+    def test_enabled_creates_dirs(self, tmp_path):
+        """DebugLogger with enabled=True must create debug directories."""
+        from debug_logger import DebugLogger
+
+        debug_path = tmp_path / "debug"
+        DebugLogger(debug_path=str(debug_path), enabled=True)
+
+        assert (debug_path / "snapshots").is_dir()
+        assert (debug_path / "logs").is_dir()
+
+    def test_set_enabled_creates_dirs(self, tmp_path):
+        """Calling set_enabled(True) on a disabled logger must create directories."""
+        from debug_logger import DebugLogger
+
+        debug_path = tmp_path / "debug"
+        dl = DebugLogger(debug_path=str(debug_path), enabled=False)
+        assert not debug_path.exists()
+
+        dl.set_enabled(True)
+        assert (debug_path / "snapshots").is_dir()
+        assert (debug_path / "logs").is_dir()
+
+    def test_state_file_enabled_creates_dirs(self, tmp_path):
+        """When the state file says 'true', directories should be created on init."""
+        from debug_logger import DebugLogger
+
+        debug_path = tmp_path / "debug"
+        debug_path.mkdir()
+        (debug_path / "enabled").write_text("true")
+
+        dl = DebugLogger(debug_path=str(debug_path), enabled=False)
+        assert dl.enabled is True
+        assert (debug_path / "snapshots").is_dir()
+        assert (debug_path / "logs").is_dir()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
