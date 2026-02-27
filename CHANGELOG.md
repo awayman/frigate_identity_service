@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-02-27
+
+### Changed
+- Add Docker Compose setup and mock Frigate service for testing
+
 ## [0.4.2] - 2026-02-26
 
 ### Changed
