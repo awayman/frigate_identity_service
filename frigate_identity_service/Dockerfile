@@ -69,7 +69,6 @@ RUN groupadd -r frigate && useradd -r -g frigate frigate && \
     chown -R frigate:frigate /data && \
     chmod 777 /data
 
-# Switch to non-root user
-USER frigate
+
 
 CMD ["/run.sh"]
