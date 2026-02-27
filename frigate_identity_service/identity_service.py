@@ -57,8 +57,12 @@ def load_ha_options(options_file="/data/options.json"):
     that file and maps each option (e.g. ``mqtt_broker``) to the
     corresponding upper-case environment variable (e.g. ``MQTT_BROKER``),
     but only when the variable has not already been set in the environment.
+    
+    If the file cannot be read (permissions), environment variables must be
+    set by the Home Assistant Supervisor instead.
     """
     if not Path(options_file).exists():
+        logger.debug("Home Assistant options file not found at %s (expected only in HA addon)", options_file)
         return
 
     try:
@@ -71,8 +75,16 @@ def load_ha_options(options_file="/data/options.json"):
                 os.environ[env_key] = str(value)
 
         logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
+    except PermissionError as e:
+        logger.warning(
+            "Cannot read %s: permission denied. Using environment variables instead. "
+            "Ensure Home Assistant Supervisor is properly setting addon options as environment variables.",
+            options_file
+        )
+    except json.JSONDecodeError as e:
+        logger.warning("Failed to parse %s (invalid JSON): %s. Using environment variables instead.", options_file, e)
     except Exception as e:
-        logger.warning("Failed to load %s: %s", options_file, e)
+        logger.warning("Failed to load %s: %s. Using environment variables instead.", options_file, e)
 
 
 # Load configuration from Home Assistant Add-on options (if running as HA add-on)
@@ -94,6 +106,9 @@ FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
+
+# Log configuration source for troubleshooting
+logger.info("Configuration loaded: MQTT_BROKER=%s MQTT_PORT=%d (check if this matches your config)", MQTT_BROKER, MQTT_PORT)
 
 
 def get_default_embeddings_path():

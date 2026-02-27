@@ -1,0 +1,87 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: frigate_identity_mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    environment:
+      - MOSQUITTO_BROKER_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "sh", "-c", "mosquitto_sub -h localhost -t '$SYS/#' -n 1 || exit 0"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - frigate_network
+
+  frigate-mock:
+    build:
+      context: ./frigate_mock
+      dockerfile: Dockerfile
+    container_name: frigate_identity_frigate_mock
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_TOPIC_PREFIX=frigate
+      - EVENT_INTERVAL=20
+      - LOGGING_LEVEL=INFO
+    networks:
+      - frigate_network
+    restart: unless-stopped
+
+  identity-service:
+    build:
+      context: ./frigate_identity_service
+      dockerfile: Dockerfile
+      args:
+        USE_GPU: "false"
+        REID_MODEL: osnet_x1_0
+    container_name: frigate_identity_identity_service
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - FRIGATE_HOST=
+      - FRIGATE_PORT=5000
+      - LOGGING_LEVEL=INFO
+      - MODEL_REID=osnet_x1_0
+      - SIMILARITY_THRESHOLD=0.6
+      - ENCODING_MODEL_SIZE=medium
+      - MAX_MISSING_FRAMES=5
+      - DEBUG=false
+    volumes:
+      - identity_data:/data
+      - ./embeddings.json:/data/embeddings.json:rw
+    networks:
+      - frigate_network
+    restart: unless-stopped
+    # Identity service takes 1-2 minutes to download and initialize models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 5000), timeout=2)"]
+      interval: 30s
+      timeout: 10s
+      retries: 60
+      start_period: 150s
+
+volumes:
+  mosquitto_data:
+    driver: local
+  mosquitto_logs:
+    driver: local
+  identity_data:
+    driver: local
+
+networks:
+  frigate_network:
+    driver: bridge

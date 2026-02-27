@@ -1,13 +1,37 @@
 # Testing Guide
 
-## Prerequisites
+## Quick Start with Docker Compose (Recommended)
+
+The easiest way to set up a complete test environment is using Docker Compose. This provides Frigate, MQTT broker, and all dependencies in isolated containers:
+
+```powershell
+# Start all services
+docker-compose up -d
+
+# Run integration tests
+python run_integration_tests.py
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+See [DOCKER_COMPOSE_SETUP.md](DOCKER_COMPOSE_SETUP.md) for detailed documentation, troubleshooting, and advanced usage.
+
+---
+
+## Prerequisites (Manual Setup)
+
+If not using Docker Compose, you'll need:
 
 1. **Frigate Instance** - Running and configured to send person crops via MQTT
 2. **Home Assistant** - With MQTT integration enabled
 3. **MQTT Broker** - Accessible from both Frigate and your test machine
 4. **Python Environment** - With dependencies installed from requirements.txt
 
-## Setup Steps
+## Setup Steps (Manual)
 
 ### 1. Install Test Dependencies
 

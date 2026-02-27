@@ -64,7 +64,10 @@ RUN chmod a+x /run.sh
 # Create non-root user for runtime security
 RUN groupadd -r frigate && useradd -r -g frigate frigate && \
     chown -R frigate:frigate /app && \
-    chmod 755 /app
+    chmod 755 /app && \
+    mkdir -p /data && \
+    chown -R frigate:frigate /data && \
+    chmod 777 /data
 
 # Switch to non-root user
 USER frigate
