@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-02-27
+
+### Changed
+- Enhance logging for Home Assistant options file handling
+
 ## [0.4.3] - 2026-02-27
 
 ### Changed
