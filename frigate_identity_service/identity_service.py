@@ -61,13 +61,23 @@ def load_ha_options(options_file="/data/options.json"):
     If the file cannot be read (permissions), environment variables must be
     set by the Home Assistant Supervisor instead.
     """
-    if not Path(options_file).exists():
+    path_obj = Path(options_file)
+    logger.debug("Checking for Home Assistant options file at %s", options_file)
+    if not path_obj.exists():
         logger.debug("Home Assistant options file not found at %s (expected only in HA addon)", options_file)
         return
+    logger.debug("Home Assistant options file found at %s", options_file)
+    try:
+        stat = path_obj.stat()
+        logger.debug("Options file permissions: mode=%o, owner=%d, size=%d", stat.st_mode, stat.st_uid, stat.st_size)
+    except Exception as e:
+        logger.debug("Could not stat options file: %s", e)
 
     try:
         with open(options_file, "r") as f:
-            options = json.load(f)
+            raw = f.read()
+            logger.debug("Raw options.json contents: %s", raw)
+            options = json.loads(raw)
 
         for key, value in options.items():
             env_key = key.upper()
