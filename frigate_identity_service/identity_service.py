@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 import time
 from collections import defaultdict, deque
 import os
@@ -117,8 +118,75 @@ REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 
-# Log configuration source for troubleshooting
-logger.info("Configuration loaded: MQTT_BROKER=%s MQTT_PORT=%d", MQTT_BROKER, MQTT_PORT)
+
+def validate_config():
+    """Validate configuration values and exit with clear error if invalid.
+    
+    This function validates ranges and types for critical configuration values,
+    logging the sanitized config (with secrets redacted) for debugging purposes.
+    """
+    errors = []
+    
+    # Validate MQTT port
+    if not (1 <= MQTT_PORT <= 65535):
+        errors.append(f"MQTT_PORT must be between 1 and 65535, got {MQTT_PORT}")
+    
+    # Validate Frigate host URL format
+    if not FRIGATE_HOST.startswith(("http://", "https://")):
+        errors.append(f"FRIGATE_HOST must start with http:// or https://, got '{FRIGATE_HOST}'")
+    
+    # Validate ReID similarity threshold
+    if not (0.0 <= REID_SIMILARITY_THRESHOLD <= 1.0):
+        errors.append(f"REID_SIMILARITY_THRESHOLD must be between 0.0 and 1.0, got {REID_SIMILARITY_THRESHOLD}")
+    
+    # Validate snapshot correlation window
+    snapshot_window = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
+    if not (0.1 <= snapshot_window <= 10.0):
+        errors.append(f"SNAPSHOT_CORRELATION_WINDOW must be between 0.1 and 10.0, got {snapshot_window}")
+    
+    # Validate max tracked persons
+    max_persons = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+    if not (1 <= max_persons <= 20):
+        errors.append(f"MAX_TRACKED_PERSONS_PER_CAMERA must be between 1 and 20, got {max_persons}")
+    
+    # Validate debug retention days
+    retention = int(os.getenv("DEBUG_RETENTION_DAYS", "7"))
+    if not (1 <= retention <= 90):
+        errors.append(f"DEBUG_RETENTION_DAYS must be between 1 and 90, got {retention}")
+    
+    # If any validation errors, log and exit
+    if errors:
+        logger.error("Configuration validation failed:")
+        for error in errors:
+            logger.error("  - %s", error)
+        logger.error("Please fix the configuration and restart the service.")
+        sys.exit(1)
+    
+    # Log sanitized config (with secrets redacted)
+    mqtt_password_display = "***" if MQTT_PASSWORD else "(not set)"
+    logger.info("Configuration validated successfully:")
+    logger.info("  MQTT: %s:%d (user: %s, password: %s)", 
+                MQTT_BROKER, MQTT_PORT, MQTT_USERNAME or "(not set)", mqtt_password_display)
+    logger.info("  Frigate: %s", FRIGATE_HOST)
+    logger.info("  ReID: model=%s, device=%s, threshold=%.2f", 
+                REID_MODEL, REID_DEVICE, REID_SIMILARITY_THRESHOLD)
+    
+    # Determine default paths for display
+    embeddings_path = os.getenv("EMBEDDINGS_DB_PATH") or (
+        "/data/embeddings.json" if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")) else "embeddings.json"
+    )
+    debug_path = os.getenv("DEBUG_LOG_PATH") or (
+        "/data/debug" if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")) else "debug"
+    )
+    
+    logger.info("  Embeddings: %s", embeddings_path)
+    logger.info("  Debug: enabled=%s, path=%s", 
+                os.getenv("DEBUG_LOGGING_ENABLED", "false"), 
+                debug_path)
+
+
+# Validate configuration
+validate_config()
 
 # Warn if running as HA addon but using localhost fallback (indicates config issue)
 ha_options_path = Path("/data/options.json")
@@ -785,11 +853,24 @@ def schedule_nightly_embedding_cleanup():
                 deleted_count,
             )
 
+    def _heartbeat():
+        """Log service health status every 5 minutes"""
+        person_count = len(embedding_store.embeddings)
+        mqtt_status = "connected" if client.is_connected() else "disconnected"
+        logger.info(
+            "[HEARTBEAT] Service running | Persons tracked: %d | MQTT: %s | ReID: %s",
+            person_count,
+            mqtt_status,
+            "enabled" if REID_AVAILABLE else "disabled"
+        )
+
     scheduler.add_job(_clear_embeddings, "cron", hour=0, minute=0)
     scheduler.add_job(_cleanup_debug_logs, "cron", hour=1, minute=0)
+    scheduler.add_job(_heartbeat, "interval", minutes=5)
     scheduler.start()
     logger.info("[SCHEDULER] Nightly embedding cleanup scheduled (runs at midnight)")
     logger.info("[SCHEDULER] Debug log cleanup scheduled (runs at 01:00)")
+    logger.info("[SCHEDULER] Health heartbeat scheduled (every 5 minutes)")
     return scheduler
 
 

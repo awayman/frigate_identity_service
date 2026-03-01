@@ -27,19 +27,19 @@ options:
   debug_retention_days: 7
 schema:
   mqtt_broker: str
-  mqtt_port: int
+  mqtt_port: port
   mqtt_username: str?
-  mqtt_password: str?
-  frigate_host: str
+  mqtt_password: password?
+  frigate_host: url
   reid_model: str
   reid_device: str
-  reid_similarity_threshold: float
+  reid_similarity_threshold: float(0.0,1.0)
   embeddings_db_path: str
-  snapshot_correlation_window: float
-  max_tracked_persons_per_camera: int
+  snapshot_correlation_window: float(0.1,10.0)
+  max_tracked_persons_per_camera: int(1,20)
   debug_logging_enabled: bool
   debug_log_path: str
   debug_save_embeddings: bool
-  debug_retention_days: int
+  debug_retention_days: int(1,90)
 map:
   - data:rw

@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.github/
+
+# CI/CD
+.continue/
+
+# Testing
+tests/
+test_*.py
+conftest.py
+requirements-test.txt
+pytest.ini
+.coverage
+
+# Documentation
+*.md
+docs/
+CHANGELOG.md
+README.md
+LICENSE
+TODO.md
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Data and logs (should not be in build context)
+embeddings.json
+debug/
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Docker
+docker-compose.yml
+Dockerfile.*
