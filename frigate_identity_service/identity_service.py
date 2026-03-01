@@ -88,8 +88,7 @@ def load_ha_options(options_file="/data/options.json"):
     except PermissionError as e:
         logger.error(
             "Cannot read %s: permission denied. Using environment variables instead. "
-            "Ensure Home Assistant Supervisor is properly setting addon options as environment variables. "
-            "Check config.yaml has environment: section mapping options to env vars.",
+            "This may indicate incorrect file permissions or HA Supervisor access issues.",
             options_file
         )
     except json.JSONDecodeError as e:
@@ -126,8 +125,8 @@ ha_options_path = Path("/data/options.json")
 if ha_options_path.exists() and MQTT_BROKER == "localhost":
     logger.error(
         "Running as Home Assistant Add-on but MQTT_BROKER is 'localhost'. "
-        "This likely means environment variables were not set by HA Supervisor. "
-        "Verify config.yaml has environment: section and add-on configuration is saved."
+        "This likely means /data/options.json could not be read by load_ha_options(). "
+        "Check file permissions and HA Supervisor logs for errors."
     )
 
 

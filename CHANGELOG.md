@@ -9,13 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.7] - 2026-03-01
 
-### Changed
-- Update changelog for version 0.4.6 and enhance MQTT broker configuration handling in Home Assistant Add-on
-
-## [0.4.6] - 2026-03-01
-
 ### Fixed
-- Fixed MQTT broker configuration regression in Home Assistant Add-on where service would connect to localhost instead of configured broker. Added explicit environment variable mappings in config.yaml to ensure HA Supervisor sets configuration directly, bypassing fragile options.json file reading. Improved error logging when configuration loading fails.
+- Fixed environment variable configuration issue where incorrect environment: section syntax caused literal string values to overwrite correctly loaded options from /data/options.json, breaking MQTT connectivity. Removed problematic environment mappings - load_ha_options() function correctly handles option-to-environment-variable conversion. Improved error logging to diagnose configuration loading failures.
 
 ## [0.4.5] - 2026-02-27
 
