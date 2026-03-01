@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-03-01
+
+### Changed
+- Refactor configuration handling and improve error logging for MQTT connectivity issues
+
 ## [0.4.7] - 2026-03-01
 
 ### Fixed
