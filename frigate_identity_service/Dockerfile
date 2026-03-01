@@ -1,7 +1,7 @@
 # ============================================================================
-# Stage 1: Builder - Full-featured Python image for compilation
+# Stage 1: Builder - Python 3.12 with build dependencies
 # ============================================================================
-FROM python:3.13-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
@@ -22,9 +22,7 @@ ARG REID_MODEL=osnet_x1_0
 # Copy requirements files
 COPY requirements.txt requirements-cpu.txt ./
 
-# Install Python dependencies into /build/.venv for isolation
-RUN python -m venv /build/.venv
-ENV PATH="/build/.venv/bin:$PATH"
+# Install Python dependencies directly (no venv needed for multi-stage build)
 
 # Install all runtime deps first so that deep-person-reid's setup.py (which
 # imports the full torchreid package tree to find the version) can complete.
@@ -51,9 +49,9 @@ RUN TORCH_HOME=/build/weights python download_weights.py ${REID_MODEL} /build/we
     echo "WARNING: Weight download failed at build time. Weights will be downloaded at first startup."
 
 # ============================================================================
-# Stage 2: Runtime - Hardened Docker Image (zero CVEs, non-root by default)
+# Stage 2: Runtime - Python 3.12 slim with manual hardening
 # ============================================================================
-FROM dhi.io/python:3.13
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -69,8 +67,9 @@ LABEL \
   io.hass.type="addon" \
   io.hass.arch="amd64|aarch64"
 
-# Copy virtual environment from builder
-COPY --from=builder /build/.venv /app/.venv
+# Copy Python packages from builder (system site-packages)
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --from=builder /build/*.py /app/
@@ -78,16 +77,21 @@ COPY --from=builder /build/*.py /app/
 # Copy pre-downloaded weights
 COPY --from=builder /build/weights /app/weights
 
-# Copy startup script
-COPY run.sh /run.sh
-RUN chmod a+x /run.sh
+# Copy startup script and make executable
+COPY --chmod=755 run.sh /run.sh
 
-# Create data directory with appropriate permissions
-# DHI base image already runs as non-root user 'nonroot' (UID 65532)
-RUN mkdir -p /data && chmod 777 /data
+# Create non-root user for security
+RUN groupadd -r frigate_identity && \
+    useradd -r -g frigate_identity -u 1000 frigate_identity && \
+    mkdir -p /data && \
+    chown -R frigate_identity:frigate_identity /app /data && \
+    chmod 755 /app && \
+    chmod 777 /data
 
-# Set PATH to use virtualenv
-ENV PATH="/app/.venv/bin:$PATH"
+# Switch to non-root user
+USER frigate_identity
+
+# Python environment variables
 ENV PYTHONUNBUFFERED=1
 ENV TORCH_HOME=/app/weights
 
