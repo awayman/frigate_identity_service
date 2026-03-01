@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-03-01
+
+### Changed
+- Update changelog for version 0.4.6 and enhance MQTT broker configuration handling in Home Assistant Add-on
+
 ## [0.4.6] - 2026-03-01
 
 ### Fixed
