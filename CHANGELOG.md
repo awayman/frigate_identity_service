@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-03-01
+
+### Changed
+- Add local testing files to .gitignore
+- Downgrade Python version to 3.12 in CI, auto-release, and Dockerfile for compatibility
+- Update Python version to 3.13 in CI and release workflows; enhance Dockerfile for multi-stage builds; add configuration validation in identity_service.py; improve config.yaml with type constraints; create .dockerignore for build context management.
+
 ## [0.4.8] - 2026-03-01
 
 ### Changed
