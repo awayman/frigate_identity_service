@@ -121,13 +121,14 @@ class TestMatcher:
         """Test finding exact match with identical embeddings."""
         from matcher import EmbeddingMatcher
 
+        matcher = EmbeddingMatcher()
         query = np.array([1.0, 0.0, 0.0])
         stored = {
             "person1": (np.array([1.0, 0.0, 0.0]), "camera1", 0.9),
             "person2": (np.array([0.0, 1.0, 0.0]), "camera2", 0.8),
         }
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored, threshold=0.9)
+        matched, score = matcher.find_best_match(query, stored, threshold=0.9)
         assert matched == "person1"
         assert score >= 0.99
 
@@ -135,22 +136,24 @@ class TestMatcher:
         """Test that no match is returned below threshold."""
         from matcher import EmbeddingMatcher
 
+        matcher = EmbeddingMatcher()
         query = np.array([1.0, 0.0, 0.0])
         stored = {
             "person1": (np.array([0.0, 1.0, 0.0]), "camera1", 0.9),
         }
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored, threshold=0.9)
+        matched, score = matcher.find_best_match(query, stored, threshold=0.9)
         assert matched is None
 
     def test_find_best_match_empty_store(self):
         """Test matching against empty embedding store."""
         from matcher import EmbeddingMatcher
 
+        matcher = EmbeddingMatcher()
         query = np.array([1.0, 0.0, 0.0])
         stored = {}
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored, threshold=0.5)
+        matched, score = matcher.find_best_match(query, stored, threshold=0.5)
         assert matched is None
         assert score == 0.0
 
@@ -158,6 +161,7 @@ class TestMatcher:
         """Test finding top-k matches."""
         from matcher import EmbeddingMatcher
 
+        matcher = EmbeddingMatcher()
         query = np.array([1.0, 0.0, 0.0])
         stored = {
             "person1": (np.array([1.0, 0.0, 0.0]), "camera1", 0.9),
@@ -165,7 +169,7 @@ class TestMatcher:
             "person3": (np.array([0.0, 1.0, 0.0]), "camera3", 0.7),
         }
 
-        top_matches = EmbeddingMatcher.find_top_k_matches(
+        top_matches = matcher.find_top_k_matches(
             query, stored, k=2, threshold=0.0
         )
         assert len(top_matches) <= 2
@@ -181,6 +185,7 @@ class TestIntegration:
         from matcher import EmbeddingMatcher
 
         store = EmbeddingStore(temp_db)
+        matcher = EmbeddingMatcher()
 
         # Create and store embeddings
         emb1 = np.array([1.0, 0.0, 0.0])
@@ -192,7 +197,7 @@ class TestIntegration:
         stored = store.get_all_embeddings()
         query = np.array([1.0, 0.0, 0.0])
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored, threshold=0.5)
+        matched, score = matcher.find_best_match(query, stored, threshold=0.5)
         assert matched == "alice"
         assert score > 0.9
 

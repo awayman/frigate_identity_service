@@ -52,13 +52,14 @@ class TestMatcher:
         """Test finding best matching embedding."""
         from matcher import EmbeddingMatcher
 
+        matcher = EmbeddingMatcher()
         query = np.array([1.0, 0.0, 0.0])
         stored = {
             "person1": (np.array([1.0, 0.0, 0.0]), "camera1", 0.9),
             "person2": (np.array([0.0, 1.0, 0.0]), "camera2", 0.8),
         }
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored, threshold=0.9)
+        matched, score = matcher.find_best_match(query, stored, threshold=0.9)
         assert matched == "person1"
         assert score > 0.99
 
@@ -73,12 +74,13 @@ class TestIntegration:
 
         # Store embedding
         store = EmbeddingStore(temp_db)
+        matcher = EmbeddingMatcher()
         emb = np.array([1.0, 0.0, 0.0])
         store.store_embedding("alice", emb, "camera1", confidence=0.95)
 
         # Retrieve and match
         stored = store.get_all_embeddings()
-        matched, score = EmbeddingMatcher.find_best_match(emb, stored, threshold=0.5)
+        matched, score = matcher.find_best_match(emb, stored, threshold=0.5)
 
         assert matched == "alice"
         assert score > 0.99
