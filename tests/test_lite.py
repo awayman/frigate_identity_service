@@ -9,6 +9,7 @@ import pytest
 import tempfile
 import os
 import sys
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -85,6 +86,61 @@ class TestEmbeddingStore:
         store.clear()
         assert len(store.get_all_person_ids()) == 0
 
+    def test_prune_expired_embeddings(self, temp_db):
+        """Test age-based pruning removes only expired entries."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        now = datetime.now()
+        store.embeddings = {
+            "old_person": [
+                {
+                    "embedding": [0.1, 0.2],
+                    "camera": "camera1",
+                    "timestamp": (now - timedelta(hours=72)).isoformat(),
+                    "confidence": 0.8,
+                }
+            ],
+            "new_person": [
+                {
+                    "embedding": [0.3, 0.4],
+                    "camera": "camera2",
+                    "timestamp": (now - timedelta(hours=2)).isoformat(),
+                    "confidence": 0.9,
+                }
+            ],
+        }
+        store._save()
+
+        stats = store.prune_expired(max_age_hours=24)
+
+        assert stats["removed_embeddings"] == 1
+        assert stats["removed_persons"] == 1
+        assert store.person_exists("new_person")
+        assert not store.person_exists("old_person")
+
+    def test_prune_keeps_invalid_timestamps(self, temp_db):
+        """Invalid timestamp entries are preserved to avoid accidental data loss."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.embeddings = {
+            "person1": [
+                {
+                    "embedding": [0.1],
+                    "camera": "camera1",
+                    "timestamp": "not-a-timestamp",
+                    "confidence": 0.7,
+                }
+            ]
+        }
+        store._save()
+
+        stats = store.prune_expired(max_age_hours=1)
+
+        assert stats["removed_embeddings"] == 0
+        assert store.person_exists("person1")
+
 
 class TestMatcher:
     """Test Matcher without requiring numpy."""
@@ -102,7 +158,8 @@ class TestMatcher:
         query = [1.0, 0.0, 0.0]
         stored = {}
 
-        matched, score = EmbeddingMatcher.find_best_match(query, stored)
+        matcher = EmbeddingMatcher()
+        matched, score = matcher.find_best_match(query, stored)
         assert matched is None
         assert score == 0.0
 
@@ -196,6 +253,21 @@ class TestReIDModelSelection:
         assert "REID_MODEL" in source
         assert 'os.getenv("REID_MODEL"' in source
         assert "model_name=" in source
+
+    def test_identity_service_reads_embedding_retention_env(self):
+        """identity_service.py reads embedding retention environment variables."""
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "identity_service.py",
+        )
+        with open(src_path) as f:
+            source = f.read()
+
+        assert "EMBEDDING_RETENTION_MODE" in source
+        assert 'os.getenv("EMBEDDING_MAX_AGE_HOURS"' in source
+        assert 'os.getenv("EMBEDDING_PRUNE_INTERVAL_MINUTES"' in source
+        assert 'os.getenv("EMBEDDING_FULL_CLEAR_TIME"' in source
 
 
 class TestLoadHaOptions:

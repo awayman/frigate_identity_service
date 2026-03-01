@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Configurable recency weighting system with three decay modes: `linear`, `exponential`, and `none`
+- Optional confidence weighting to prioritize high-confidence embeddings
+- Comprehensive test suite for recency and confidence weighting (`test_recency_weighting.py`)
+- New configuration options: `RECENCY_DECAY_MODE`, `RECENCY_WEIGHT_FLOOR`, `USE_CONFIDENCE_WEIGHTING`
+
+### Changed
+- Replace hardcoded midnight embedding clear with configurable retention policy (`age_prune`, `full_clear_daily`, `manual`), defaulting to age-based pruning for better identity continuity
+- Recency weighting now dynamically scales with `EMBEDDING_MAX_AGE_HOURS` instead of hardcoded 24-hour decay
+- EmbeddingMatcher refactored from static methods to instance-based with configuration
+- Weight floor reduced from 0.5 to 0.3 (default) for better differentiation across retention window
+- Linear decay now covers full retention period (e.g., 48h) instead of plateauing at 24h
+
+### Improved
+- Better weight differentiation for embeddings at different ages within retention window
+- More granular control over how embedding age affects matching confidence
+- Exponential decay option provides faster initial decay for time-sensitive scenarios
+
 ## [0.4.9] - 2026-03-01
 
 ### Changed

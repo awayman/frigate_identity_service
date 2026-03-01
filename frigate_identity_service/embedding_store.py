@@ -1,6 +1,7 @@
 import json
 import os
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, Optional, List, Union, Any
 
 try:
@@ -27,6 +28,7 @@ class EmbeddingStore:
         """
         self.db_path = db_path
         self.embeddings: Dict[str, List[Dict]] = {}
+        self._lock = threading.RLock()
         self._load()
 
     def _load(self):
@@ -69,29 +71,30 @@ class EmbeddingStore:
     def _save(self):
         """Save embeddings to disk."""
         try:
-            # Ensure parent directory exists
-            os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+            with self._lock:
+                # Ensure parent directory exists
+                os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
 
-            serializable = {}
-            for person_id, embeddings_list in self.embeddings.items():
-                serializable[person_id] = []
-                for emb_entry in embeddings_list:
-                    embedding = emb_entry["embedding"]
-                    if np is not None and isinstance(embedding, np.ndarray):
-                        embedding = embedding.tolist()
-                    elif not isinstance(embedding, list):
-                        embedding = list(embedding)
-                    serializable[person_id].append(
-                        {
-                            "embedding": embedding,
-                            "camera": emb_entry["camera"],
-                            "timestamp": emb_entry["timestamp"],
-                            "confidence": emb_entry["confidence"],
-                        }
-                    )
+                serializable = {}
+                for person_id, embeddings_list in self.embeddings.items():
+                    serializable[person_id] = []
+                    for emb_entry in embeddings_list:
+                        embedding = emb_entry["embedding"]
+                        if np is not None and isinstance(embedding, np.ndarray):
+                            embedding = embedding.tolist()
+                        elif not isinstance(embedding, list):
+                            embedding = list(embedding)
+                        serializable[person_id].append(
+                            {
+                                "embedding": embedding,
+                                "camera": emb_entry["camera"],
+                                "timestamp": emb_entry["timestamp"],
+                                "confidence": emb_entry["confidence"],
+                            }
+                        )
 
-            with open(self.db_path, "w") as f:
-                json.dump(serializable, f)
+                with open(self.db_path, "w") as f:
+                    json.dump(serializable, f)
         except Exception as e:
             print(f"Error saving embeddings to {self.db_path}: {e}")
 
@@ -120,14 +123,15 @@ class EmbeddingStore:
             "confidence": confidence,
         }
 
-        if person_id not in self.embeddings:
-            self.embeddings[person_id] = [new_entry]
-        else:
-            self.embeddings[person_id].insert(0, new_entry)
-            # Trim to max allowed
-            self.embeddings[person_id] = self.embeddings[person_id][
-                : self.MAX_EMBEDDINGS_PER_PERSON
-            ]
+        with self._lock:
+            if person_id not in self.embeddings:
+                self.embeddings[person_id] = [new_entry]
+            else:
+                self.embeddings[person_id].insert(0, new_entry)
+                # Trim to max allowed
+                self.embeddings[person_id] = self.embeddings[person_id][
+                    : self.MAX_EMBEDDINGS_PER_PERSON
+                ]
 
         self._save()
 
@@ -142,20 +146,21 @@ class EmbeddingStore:
             ordered most-recent first.
         """
         result = {}
-        for person_id, embeddings_list in self.embeddings.items():
-            result[person_id] = []
-            for emb_entry in embeddings_list:
-                embedding = emb_entry["embedding"]
-                if isinstance(embedding, list) and np is not None:
-                    embedding = np.array(embedding)
-                result[person_id].append(
-                    (
-                        embedding,
-                        emb_entry["camera"],
-                        emb_entry["confidence"],
-                        emb_entry["timestamp"],
+        with self._lock:
+            for person_id, embeddings_list in self.embeddings.items():
+                result[person_id] = []
+                for emb_entry in embeddings_list:
+                    embedding = emb_entry["embedding"]
+                    if isinstance(embedding, list) and np is not None:
+                        embedding = np.array(embedding)
+                    result[person_id].append(
+                        (
+                            embedding,
+                            emb_entry["camera"],
+                            emb_entry["confidence"],
+                            emb_entry["timestamp"],
+                        )
                     )
-                )
         return result
 
     def get_embedding(self, person_id: str) -> Optional[Union[List, Any]]:
@@ -167,10 +172,11 @@ class EmbeddingStore:
         Returns:
             Feature vector or None if not found
         """
-        if person_id not in self.embeddings or not self.embeddings[person_id]:
-            return None
+        with self._lock:
+            if person_id not in self.embeddings or not self.embeddings[person_id]:
+                return None
 
-        embedding = self.embeddings[person_id][0]["embedding"]
+            embedding = self.embeddings[person_id][0]["embedding"]
         if isinstance(embedding, list) and np is not None:
             embedding = np.array(embedding)
         return embedding
@@ -184,7 +190,8 @@ class EmbeddingStore:
         Returns:
             True if person exists, False otherwise
         """
-        return person_id in self.embeddings and len(self.embeddings[person_id]) > 0
+        with self._lock:
+            return person_id in self.embeddings and len(self.embeddings[person_id]) > 0
 
     def delete_person(self, person_id: str) -> bool:
         """Delete a person from the store.
@@ -195,11 +202,12 @@ class EmbeddingStore:
         Returns:
             True if deleted, False if not found
         """
-        if person_id in self.embeddings:
-            del self.embeddings[person_id]
-            self._save()
-            return True
-        return False
+        with self._lock:
+            if person_id in self.embeddings:
+                del self.embeddings[person_id]
+                self._save()
+                return True
+            return False
 
     def get_all_person_ids(self) -> List[str]:
         """Get list of all stored person IDs.
@@ -207,10 +215,83 @@ class EmbeddingStore:
         Returns:
             List of person IDs
         """
-        return list(self.embeddings.keys())
+        with self._lock:
+            return list(self.embeddings.keys())
 
     def clear(self):
         """Clear all embeddings from the store."""
-        self.embeddings = {}
-        self._save()
+        with self._lock:
+            self.embeddings = {}
+            self._save()
         print("[EMBEDDINGS] Cleared all embeddings from store")
+
+    @staticmethod
+    def _parse_timestamp(timestamp_value: Any) -> Optional[datetime]:
+        """Parse an ISO8601 timestamp string into a naive UTC datetime."""
+        if not isinstance(timestamp_value, str):
+            return None
+
+        normalized = timestamp_value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+
+    def prune_expired(self, max_age_hours: float) -> Dict[str, int]:
+        """Prune embeddings older than max_age_hours.
+
+        Invalid or missing timestamps are preserved to avoid accidental data loss.
+
+        Args:
+            max_age_hours: Maximum age to retain, in hours.
+
+        Returns:
+            A dictionary with removal and remaining item counts.
+        """
+        if max_age_hours <= 0:
+            raise ValueError("max_age_hours must be > 0")
+
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+        removed_embeddings = 0
+        removed_persons = 0
+
+        with self._lock:
+            for person_id, entries in list(self.embeddings.items()):
+                retained_entries = []
+                for entry in entries:
+                    entry_timestamp = self._parse_timestamp(entry.get("timestamp"))
+                    if entry_timestamp is None or entry_timestamp >= cutoff:
+                        retained_entries.append(entry)
+                        continue
+                    removed_embeddings += 1
+
+                if retained_entries:
+                    self.embeddings[person_id] = retained_entries
+                else:
+                    removed_persons += 1
+                    del self.embeddings[person_id]
+
+            if removed_embeddings > 0:
+                self._save()
+
+            remaining_persons = len(self.embeddings)
+            remaining_embeddings = sum(len(entries) for entries in self.embeddings.values())
+
+        return {
+            "removed_embeddings": removed_embeddings,
+            "removed_persons": removed_persons,
+            "remaining_persons": remaining_persons,
+            "remaining_embeddings": remaining_embeddings,
+        }
+
+    def get_stats(self) -> Dict[str, int]:
+        """Return summary stats for stored embeddings."""
+        with self._lock:
+            return {
+                "persons": len(self.embeddings),
+                "embeddings": sum(len(entries) for entries in self.embeddings.values()),
+            }

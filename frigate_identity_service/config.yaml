@@ -19,6 +19,13 @@ options:
   reid_device: "cpu"
   reid_similarity_threshold: 0.6
   embeddings_db_path: "/data/embeddings.json"
+  embedding_retention_mode: "age_prune"
+  embedding_max_age_hours: 48
+  embedding_prune_interval_minutes: 30
+  embedding_full_clear_time: "00:00"
+  recency_decay_mode: "linear"
+  recency_weight_floor: 0.3
+  use_confidence_weighting: false
   snapshot_correlation_window: 2.0
   max_tracked_persons_per_camera: 3
   debug_logging_enabled: false
@@ -35,6 +42,13 @@ schema:
   reid_device: str
   reid_similarity_threshold: float(0.0,1.0)
   embeddings_db_path: str
+  embedding_retention_mode: str
+  embedding_max_age_hours: int(1,720)
+  embedding_prune_interval_minutes: int(1,1440)
+  embedding_full_clear_time: str
+  recency_decay_mode: str
+  recency_weight_floor: float(0.0,0.9)
+  use_confidence_weighting: bool
   snapshot_correlation_window: float(0.1,10.0)
   max_tracked_persons_per_camera: int(1,20)
   debug_logging_enabled: bool

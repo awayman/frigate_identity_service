@@ -46,6 +46,10 @@ fully supported.
 | `REID_DEVICE` | `auto` | Device for ReID (`auto`, `cuda`, `cpu`) |
 | `REID_SIMILARITY_THRESHOLD` | `0.6` | Minimum similarity score for ReID match |
 | `EMBEDDINGS_DB_PATH` | `embeddings.json` | Path to store person embeddings |
+| `EMBEDDING_RETENTION_MODE` | `age_prune` | Embedding retention policy: `age_prune`, `full_clear_daily`, or `manual` |
+| `EMBEDDING_MAX_AGE_HOURS` | `48` | Max embedding age before removal when `EMBEDDING_RETENTION_MODE=age_prune` |
+| `EMBEDDING_PRUNE_INTERVAL_MINUTES` | `30` | How often expired embeddings are pruned in `age_prune` mode |
+| `EMBEDDING_FULL_CLEAR_TIME` | `00:00` | Daily clear time (`HH:MM` 24h) when `EMBEDDING_RETENTION_MODE=full_clear_daily` |
 | `SNAPSHOT_CORRELATION_WINDOW` | `2.0` | Seconds to correlate MQTT snapshots to persons |
 | `MAX_TRACKED_PERSONS_PER_CAMERA` | `3` | Max persons tracked per camera for correlation |
 | `DEBUG_LOGGING_ENABLED` | `false` | Enable debug logging for misidentification analysis |
@@ -134,6 +138,13 @@ docker run \
   --env EMBEDDINGS_DB_PATH=/persistent/my-embeddings.json \
   --env MQTT_BROKER=host.docker.internal \
   frigate-identity
+```
+
+Embedding retention defaults to age-based pruning (no scheduled full reset). To retain legacy behavior, set:
+
+```bash
+EMBEDDING_RETENTION_MODE=full_clear_daily
+EMBEDDING_FULL_CLEAR_TIME=00:00
 ```
 
 **Home Assistant Add-on**

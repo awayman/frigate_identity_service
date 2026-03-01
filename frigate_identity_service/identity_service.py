@@ -153,6 +153,70 @@ def validate_config():
     retention = int(os.getenv("DEBUG_RETENTION_DAYS", "7"))
     if not (1 <= retention <= 90):
         errors.append(f"DEBUG_RETENTION_DAYS must be between 1 and 90, got {retention}")
+
+    # Validate embedding retention mode
+    retention_mode = os.getenv("EMBEDDING_RETENTION_MODE", "age_prune").lower()
+    valid_retention_modes = {"age_prune", "full_clear_daily", "manual"}
+    if retention_mode not in valid_retention_modes:
+        errors.append(
+            "EMBEDDING_RETENTION_MODE must be one of "
+            f"{sorted(valid_retention_modes)}, got '{retention_mode}'"
+        )
+
+    # Validate embedding max age
+    max_age_hours = float(os.getenv("EMBEDDING_MAX_AGE_HOURS", "48"))
+    if not (1 <= max_age_hours <= 720):
+        errors.append(
+            "EMBEDDING_MAX_AGE_HOURS must be between 1 and 720, "
+            f"got {max_age_hours}"
+        )
+
+    # Validate prune interval
+    prune_interval = int(os.getenv("EMBEDDING_PRUNE_INTERVAL_MINUTES", "30"))
+    if not (1 <= prune_interval <= 1440):
+        errors.append(
+            "EMBEDDING_PRUNE_INTERVAL_MINUTES must be between 1 and 1440, "
+            f"got {prune_interval}"
+        )
+
+    # Validate full clear time format HH:MM
+    full_clear_time = os.getenv("EMBEDDING_FULL_CLEAR_TIME", "00:00")
+    try:
+        hour_str, minute_str = full_clear_time.split(":", 1)
+        hour = int(hour_str)
+        minute = int(minute_str)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except (ValueError, AttributeError):
+        errors.append(
+            "EMBEDDING_FULL_CLEAR_TIME must use 24h HH:MM format, "
+            f"got '{full_clear_time}'"
+        )
+
+    # Validate recency decay mode
+    recency_decay_mode = os.getenv("RECENCY_DECAY_MODE", "linear").lower()
+    valid_decay_modes = {"linear", "exponential", "none"}
+    if recency_decay_mode not in valid_decay_modes:
+        errors.append(
+            "RECENCY_DECAY_MODE must be one of "
+            f"{sorted(valid_decay_modes)}, got '{recency_decay_mode}'"
+        )
+
+    # Validate recency weight floor
+    recency_weight_floor = float(os.getenv("RECENCY_WEIGHT_FLOOR", "0.3"))
+    if not (0.0 <= recency_weight_floor <= 0.9):
+        errors.append(
+            "RECENCY_WEIGHT_FLOOR must be between 0.0 and 0.9, "
+            f"got {recency_weight_floor}"
+        )
+
+    # Validate use_confidence_weighting
+    use_confidence_weighting_str = os.getenv("USE_CONFIDENCE_WEIGHTING", "false").lower()
+    if use_confidence_weighting_str not in {"true", "false"}:
+        errors.append(
+            "USE_CONFIDENCE_WEIGHTING must be 'true' or 'false', "
+            f"got '{use_confidence_weighting_str}'"
+        )
     
     # If any validation errors, log and exit
     if errors:
@@ -180,6 +244,38 @@ def validate_config():
     )
     
     logger.info("  Embeddings: %s", embeddings_path)
+    logger.info(
+        "  Embedding retention: mode=%s, max_age_hours=%.1f, prune_interval_minutes=%d, full_clear_time=%s",
+        retention_mode,
+        max_age_hours,
+        prune_interval,
+        full_clear_time,
+    )
+    
+    logger.info(
+        "  Recency weighting: decay_mode=%s, weight_floor=%.2f, use_confidence=%s",
+        recency_decay_mode,
+        recency_weight_floor,
+        use_confidence_weighting_str,
+    )
+    
+    # Log retention mode explanation
+    if retention_mode == "age_prune":
+        logger.info(
+            "  → Embeddings older than %.1f hours will be pruned every %d minutes (continuous identity)",
+            max_age_hours,
+            prune_interval,
+        )
+    elif retention_mode == "full_clear_daily":
+        logger.info(
+            "  → All embeddings will be cleared daily at %s (legacy mode, brief recognition gap after clear)",
+            full_clear_time,
+        )
+    else:
+        logger.info(
+            "  → No automatic embedding cleanup (manual mode, embeddings persist until explicitly cleared)"
+        )
+    
     logger.info("  Debug: enabled=%s, path=%s", 
                 os.getenv("DEBUG_LOGGING_ENABLED", "false"), 
                 debug_path)
@@ -229,10 +325,28 @@ DEBUG_LOGGING_ENABLED = os.getenv("DEBUG_LOGGING_ENABLED", "false").lower() == "
 DEBUG_LOG_PATH = os.getenv("DEBUG_LOG_PATH", get_default_debug_path())
 DEBUG_SAVE_EMBEDDINGS = os.getenv("DEBUG_SAVE_EMBEDDINGS", "false").lower() == "true"
 DEBUG_RETENTION_DAYS = int(os.getenv("DEBUG_RETENTION_DAYS", "7"))
+EMBEDDING_RETENTION_MODE = os.getenv("EMBEDDING_RETENTION_MODE", "age_prune").lower()
+EMBEDDING_MAX_AGE_HOURS = float(os.getenv("EMBEDDING_MAX_AGE_HOURS", "48"))
+EMBEDDING_PRUNE_INTERVAL_MINUTES = int(
+    os.getenv("EMBEDDING_PRUNE_INTERVAL_MINUTES", "30")
+)
+EMBEDDING_FULL_CLEAR_TIME = os.getenv("EMBEDDING_FULL_CLEAR_TIME", "00:00")
+RECENCY_DECAY_MODE = os.getenv("RECENCY_DECAY_MODE", "linear").lower()
+RECENCY_WEIGHT_FLOOR = float(os.getenv("RECENCY_WEIGHT_FLOOR", "0.3"))
+USE_CONFIDENCE_WEIGHTING = os.getenv("USE_CONFIDENCE_WEIGHTING", "false").lower() == "true"
 
 # Initialize modules
 logger.info("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
+
+logger.info("Initializing embedding matcher (decay_mode=%s, floor=%.2f, use_confidence=%s)...",
+            RECENCY_DECAY_MODE, RECENCY_WEIGHT_FLOOR, USE_CONFIDENCE_WEIGHTING)
+embedding_matcher = EmbeddingMatcher(
+    max_age_hours=EMBEDDING_MAX_AGE_HOURS,
+    decay_mode=RECENCY_DECAY_MODE,
+    weight_floor=RECENCY_WEIGHT_FLOOR,
+    use_confidence_weighting=USE_CONFIDENCE_WEIGHTING,
+)
 
 logger.info("Initializing ReID model (%s)...", REID_MODEL)
 device = None if REID_DEVICE == "auto" else REID_DEVICE
@@ -542,7 +656,7 @@ def handle_frigate_event(client, msg):
             # Extract embedding and match to stored persons
             query_embedding = reid_model.extract_embedding(snapshot_base64)
             stored_embeddings = embedding_store.get_all_embeddings()
-            person_id, similarity_score = EmbeddingMatcher.find_best_match(
+            person_id, similarity_score = embedding_matcher.find_best_match(
                 query_embedding, stored_embeddings, threshold=REID_SIMILARITY_THRESHOLD
             )
 
@@ -551,8 +665,8 @@ def handle_frigate_event(client, msg):
                 camera_person_queue[camera].append(detection_record)
 
                 # Log to debug logger for analysis
-                top_matches = EmbeddingMatcher.find_top_matches(
-                    query_embedding, stored_embeddings, top_k=5
+                top_matches = embedding_matcher.find_top_k_matches(
+                    query_embedding, stored_embeddings, k=5
                 )
                 debug_logger.log_reid_match(
                     event_id=event_id,
@@ -577,8 +691,8 @@ def handle_frigate_event(client, msg):
                 )
             else:
                 # Log no-match for debugging
-                top_matches = EmbeddingMatcher.find_top_matches(
-                    query_embedding, stored_embeddings, top_k=5
+                top_matches = embedding_matcher.find_top_k_matches(
+                    query_embedding, stored_embeddings, k=5
                 )
                 debug_logger.log_reid_no_match(
                     event_id=event_id,
@@ -826,23 +940,33 @@ def connect_with_retry(client, broker, port, max_attempts, retry_delay):
     return False
 
 
-def schedule_nightly_embedding_cleanup():
-    """Start a background scheduler that clears all embeddings at midnight.
+def _parse_clock_time(time_value):
+    """Parse HH:MM (24h) into hour, minute."""
+    hour_str, minute_str = time_value.split(":", 1)
+    return int(hour_str), int(minute_str)
 
-    This ensures the ReID database only contains embeddings from the current
-    day, preventing stale appearance data from causing false matches.
-    Frigate facial recognition will repopulate the store throughout each day.
-    """
+
+def schedule_embedding_maintenance():
+    """Start background jobs for embedding retention, debug cleanup, and heartbeat."""
     scheduler = BackgroundScheduler()
 
     def _clear_embeddings():
-        logger.info(
-            "[CLEANUP] Nightly cleanup: clearing all embeddings for daily refresh"
-        )
+        logger.info("[CLEANUP] Full embedding clear triggered by retention policy")
         embedding_store.clear()
         logger.info(
-            "[CLEANUP] Embedding store cleared. Store will rebuild as people are seen today."
+            "[CLEANUP] Embedding store cleared. Store will rebuild as people are recognized."
         )
+
+    def _prune_embeddings():
+        stats = embedding_store.prune_expired(EMBEDDING_MAX_AGE_HOURS)
+        if stats["removed_embeddings"] > 0:
+            logger.info(
+                "[CLEANUP] Pruned %d expired embeddings (%d persons removed, %d persons / %d embeddings remain)",
+                stats["removed_embeddings"],
+                stats["removed_persons"],
+                stats["remaining_persons"],
+                stats["remaining_embeddings"],
+            )
 
     def _cleanup_debug_logs():
         logger.info("[CLEANUP] Running debug log retention cleanup...")
@@ -855,20 +979,43 @@ def schedule_nightly_embedding_cleanup():
 
     def _heartbeat():
         """Log service health status every 5 minutes"""
-        person_count = len(embedding_store.embeddings)
+        store_stats = embedding_store.get_stats()
         mqtt_status = "connected" if client.is_connected() else "disconnected"
         logger.info(
-            "[HEARTBEAT] Service running | Persons tracked: %d | MQTT: %s | ReID: %s",
-            person_count,
+            "[HEARTBEAT] Service running | Persons tracked: %d | Embeddings: %d | MQTT: %s | ReID: %s",
+            store_stats["persons"],
+            store_stats["embeddings"],
             mqtt_status,
-            "enabled" if REID_AVAILABLE else "disabled"
+            "enabled" if REID_AVAILABLE else "disabled",
         )
 
-    scheduler.add_job(_clear_embeddings, "cron", hour=0, minute=0)
+    if EMBEDDING_RETENTION_MODE == "age_prune":
+        scheduler.add_job(
+            _prune_embeddings,
+            "interval",
+            minutes=EMBEDDING_PRUNE_INTERVAL_MINUTES,
+        )
+        logger.info(
+            "[SCHEDULER] Embedding retention mode=age_prune (max_age_hours=%.1f, interval=%d minutes)",
+            EMBEDDING_MAX_AGE_HOURS,
+            EMBEDDING_PRUNE_INTERVAL_MINUTES,
+        )
+    elif EMBEDDING_RETENTION_MODE == "full_clear_daily":
+        clear_hour, clear_minute = _parse_clock_time(EMBEDDING_FULL_CLEAR_TIME)
+        scheduler.add_job(_clear_embeddings, "cron", hour=clear_hour, minute=clear_minute)
+        logger.info(
+            "[SCHEDULER] Embedding retention mode=full_clear_daily (runs at %02d:%02d)",
+            clear_hour,
+            clear_minute,
+        )
+    else:
+        logger.info(
+            "[SCHEDULER] Embedding retention mode=manual (no automatic embedding cleanup)"
+        )
+
     scheduler.add_job(_cleanup_debug_logs, "cron", hour=1, minute=0)
     scheduler.add_job(_heartbeat, "interval", minutes=5)
     scheduler.start()
-    logger.info("[SCHEDULER] Nightly embedding cleanup scheduled (runs at midnight)")
     logger.info("[SCHEDULER] Debug log cleanup scheduled (runs at 01:00)")
     logger.info("[SCHEDULER] Health heartbeat scheduled (every 5 minutes)")
     return scheduler
@@ -881,8 +1028,8 @@ client.on_message = on_message
 if MQTT_USERNAME:
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
-# Start the nightly cleanup scheduler before entering the MQTT loop
-scheduler = schedule_nightly_embedding_cleanup()
+# Start maintenance scheduler before entering the MQTT loop
+scheduler = schedule_embedding_maintenance()
 
 if connect_with_retry(
     client, MQTT_BROKER, MQTT_PORT, MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY
