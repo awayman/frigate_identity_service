@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-03-01
+
+### Fixed
+- Fixed MQTT broker configuration regression in Home Assistant Add-on where service would connect to localhost instead of configured broker. Added explicit environment variable mappings in config.yaml to ensure HA Supervisor sets configuration directly, bypassing fragile options.json file reading. Improved error logging when configuration loading fails.
+
 ## [0.4.5] - 2026-02-27
 
 ### Changed

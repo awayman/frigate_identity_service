@@ -86,9 +86,10 @@ def load_ha_options(options_file="/data/options.json"):
 
         logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
     except PermissionError as e:
-        logger.warning(
+        logger.error(
             "Cannot read %s: permission denied. Using environment variables instead. "
-            "Ensure Home Assistant Supervisor is properly setting addon options as environment variables.",
+            "Ensure Home Assistant Supervisor is properly setting addon options as environment variables. "
+            "Check config.yaml has environment: section mapping options to env vars.",
             options_file
         )
     except json.JSONDecodeError as e:
@@ -118,7 +119,16 @@ REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.6"))
 
 # Log configuration source for troubleshooting
-logger.info("Configuration loaded: MQTT_BROKER=%s MQTT_PORT=%d (check if this matches your config)", MQTT_BROKER, MQTT_PORT)
+logger.info("Configuration loaded: MQTT_BROKER=%s MQTT_PORT=%d", MQTT_BROKER, MQTT_PORT)
+
+# Warn if running as HA addon but using localhost fallback (indicates config issue)
+ha_options_path = Path("/data/options.json")
+if ha_options_path.exists() and MQTT_BROKER == "localhost":
+    logger.error(
+        "Running as Home Assistant Add-on but MQTT_BROKER is 'localhost'. "
+        "This likely means environment variables were not set by HA Supervisor. "
+        "Verify config.yaml has environment: section and add-on configuration is saved."
+    )
 
 
 def get_default_embeddings_path():
