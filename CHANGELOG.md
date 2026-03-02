@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-02
+
+### Added
+- Implement embedding retention policies and recency weighting
+### Changed
+- test: Fix unit tests to use EmbeddingMatcher instance methods
+
 ### Added
 - Configurable recency weighting system with three decay modes: `linear`, `exponential`, and `none`
 - Optional confidence weighting to prioritize high-confidence embeddings
