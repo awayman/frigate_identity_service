@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-03-02
+
+### Added
+- Enable confidence weighting for embeddings in configuration
+- Enhance event filtering and reporting in integration tests
+
 ### Changed
 - Raise default `REID_SIMILARITY_THRESHOLD` from 0.6 to 0.75 to reduce borderline ReID misidentifications
 - Update docs, environment templates, and configuration examples to reflect the 0.75 default
