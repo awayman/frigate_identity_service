@@ -333,7 +333,7 @@ EMBEDDING_PRUNE_INTERVAL_MINUTES = int(
 EMBEDDING_FULL_CLEAR_TIME = os.getenv("EMBEDDING_FULL_CLEAR_TIME", "00:00")
 RECENCY_DECAY_MODE = os.getenv("RECENCY_DECAY_MODE", "linear").lower()
 RECENCY_WEIGHT_FLOOR = float(os.getenv("RECENCY_WEIGHT_FLOOR", "0.3"))
-USE_CONFIDENCE_WEIGHTING = os.getenv("USE_CONFIDENCE_WEIGHTING", "false").lower() == "true"
+USE_CONFIDENCE_WEIGHTING = os.getenv("USE_CONFIDENCE_WEIGHTING", "true").lower() == "true"
 
 # Initialize modules
 logger.info("Initializing embedding store...")

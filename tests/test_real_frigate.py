@@ -424,7 +424,7 @@ class TestRealFrigateIntegration:
             max_age_hours=48.0,
             decay_mode="linear",
             weight_floor=0.3,
-            use_confidence_weighting=False
+            use_confidence_weighting=True
         )
         logger.info("✓ Matcher initialized")
         
