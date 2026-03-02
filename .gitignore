@@ -1,6 +1,8 @@
 # Sensitive Data - NEVER commit these
 .env
 .env.integration-test
+.env.*
+!.env.example
 embeddings.json
 config.json
 
@@ -39,6 +41,8 @@ MANIFEST
 venv/
 ENV/
 env/
+.python-version
+.envrc
 
 # Testing
 .pytest_cache/
@@ -47,6 +51,7 @@ env/
 htmlcov/
 *.cover
 .hypothesis/
+tests/output/
 
 # IDEs
 .vscode/

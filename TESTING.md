@@ -22,6 +22,148 @@ See [DOCKER_COMPOSE_SETUP.md](DOCKER_COMPOSE_SETUP.md) for detailed documentatio
 
 ---
 
+## Testing with Real Frigate Instance
+
+To test against a **real Frigate instance** with actual snapshots and person detection, you can run integration tests that fetch images directly from the Frigate API:
+
+### Setup
+
+1. Ensure Frigate is running and accessible (e.g., `http://192.168.1.100:5000`)
+2. Frigate should have recent person detection events available
+3. Set environment variable(s):
+
+```powershell
+# Set Frigate URL (required)
+$env:FRIGATE_HOST = "http://192.168.1.100:5000"
+
+# Optional: If Frigate requires authentication
+$env:FRIGATE_API_KEY = "your-api-key-if-needed"
+```
+
+### Run Real Frigate Tests
+
+```powershell
+# Run all tests that use real Frigate
+pytest tests/test_real_frigate.py -v -s
+
+# Run a specific test
+pytest tests/test_real_frigate.py::TestRealFrigateIntegration::test_fetch_snapshot_from_event -v -s
+
+# Run with output directory for HTML report
+pytest tests/test_real_frigate.py -v
+# Report will be generated at: tests/output/real_frigate_report.html
+```
+
+### Filter Events by Day (UTC)
+
+You can target a specific UTC day when fetching Frigate events.
+
+```powershell
+# Exact UTC date
+$env:FRIGATE_EVENT_DATE = "2026-03-01"
+pytest tests/test_real_frigate.py -v -s
+
+# Relative UTC day (0=today, 1=yesterday, 2=two days ago)
+Remove-Item Env:FRIGATE_EVENT_DATE -ErrorAction SilentlyContinue
+$env:FRIGATE_EVENT_DAYS_AGO = "1"
+pytest tests/test_real_frigate.py -v -s
+```
+
+Notes:
+- Set only one of `FRIGATE_EVENT_DATE` or `FRIGATE_EVENT_DAYS_AGO`.
+- `FRIGATE_EVENT_DATE` format must be `YYYY-MM-DD`.
+- `FRIGATE_EVENT_DAYS_AGO` must be an integer `>= 0`.
+
+### Run Real Frigate Tests via Integration Runner
+
+```powershell
+# Real Frigate tests (all available recent events)
+python run_integration_tests.py --real-frigate-host http://192.168.1.100:5000
+
+# Filter by exact UTC date
+python run_integration_tests.py --real-frigate-host http://192.168.1.100:5000 --event-date 2026-03-01
+
+# Filter by relative UTC day
+python run_integration_tests.py --real-frigate-host http://192.168.1.100:5000 --days-ago 1
+```
+
+`--event-date` and `--days-ago` are mutually exclusive.
+
+### What Gets Tested
+
+The real Frigate tests validate the complete E2E pipeline:
+
+1. **API Connectivity** - Verifies Frigate API is accessible
+2. **Event Retrieval** - Fetches recent person detection events
+3. **Snapshot Fetching** - Downloads actual images via HTTP API
+4. **JPEG Validation** - Ensures images are valid
+5. **Embedding Extraction** - Uses ReIDModel to generate embeddings
+6. **Person Matching** - Compares embeddings for identification
+7. **Visual Report** - Generates HTML report with matched snapshots
+
+### View Results
+
+After tests complete, open the HTML report in a browser:
+
+```powershell
+# Windows
+start tests/output/real_frigate_report.html
+
+# macOS
+open tests/output/real_frigate_report.html
+
+# Linux
+firefox tests/output/real_frigate_report.html
+```
+
+The report shows:
+- **Snapshots** - Inline JPEG images fetched from Frigate
+- **Identified Persons** - Matched person IDs with confidence scores
+- **Statistics** - Success rate, total processed, accuracy metrics
+- **Color Coding** - Green for successful matches, red for mismatches
+
+### Skipping Tests (If Frigate Not Available)
+
+If `FRIGATE_HOST` is not set, real Frigate tests will be skipped gracefully:
+
+```powershell
+# These tests will skip automatically if FRIGATE_HOST is not configured
+pytest tests/test_real_frigate.py -v
+```
+
+### Authentication
+
+If your Frigate instance requires an API key:
+
+```powershell
+$env:FRIGATE_HOST = "https://192.168.1.100:5000"
+$env:FRIGATE_API_KEY = "fgabc123xyz"
+
+pytest tests/test_real_frigate.py -v
+```
+
+### Troubleshooting
+
+**"FRIGATE_HOST environment variable not set"**
+- Set the environment variable before running tests
+- Verify Frigate is running and accessible at the URL
+
+**"Frigate API not accessible"**
+- Check firewall rules allow your machine to reach Frigate
+- Verify the FRIGATE_HOST URL is correct and includes the port (e.g., `:5000`)
+- If using HTTPS, ensure certificate is valid or set SSL verification appropriately
+
+**"No recent events found in Frigate"**
+- Frigate needs to have detected persons in recent history
+- Wait for a person to be detected by Frigate, or check that cameras are recording
+
+**"ReID model not available"**
+- Model will be downloaded on first initialization (~200MB, 1-2 minutes)
+- Ensure sufficient disk space and internet connectivity
+- Check that PyTorch and torchreid are installed
+
+---
+
 ## Prerequisites (Manual Setup)
 
 If not using Docker Compose, you'll need:
@@ -159,8 +301,8 @@ python test_mqtt_publisher.py --broker localhost --port 1883 --test reid
 ```
 
 **Expected behavior:**
-- Same color (red)  should match alice above 0.6 threshold
-- Different color (yellow)  should NOT match, similarity < 0.6
+- Same color (red)  should match alice above 0.75 threshold
+- Different color (yellow)  should NOT match, similarity < 0.75
 
 **Service Output:**
 ```
@@ -202,15 +344,15 @@ If image data is missing, Frigate may not be sending it. Check that:
 
 Adjust the similarity threshold to be more strict:
 ```powershell
-$env:REID_SIMILARITY_THRESHOLD = "0.7"  # More strict (default 0.6)
+$env:REID_SIMILARITY_THRESHOLD = "0.8"  # More strict (default 0.75)
 python identity_service.py
 ```
 
 Test with different thresholds:
 - **0.5** - Very loose (many false positives)
-- **0.6** - Default (balanced)
-- **0.7** - Stricter (fewer false positives, more misses)
-- **0.8** - Very strict (only exact matches)
+- **0.75** - Default (balanced)
+- **0.8** - Stricter (fewer false positives, more misses)
+- **0.85** - Very strict (only exact matches)
 
 ### Model loading fails with GPU errors
 

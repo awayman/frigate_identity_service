@@ -1,5 +1,6 @@
 import base64
 import io
+import logging
 import os
 from PIL import Image
 from typing import Optional
@@ -44,6 +45,8 @@ TORCHREID_MODELS = {
 # Default directory where bundled weights are stored inside the image.
 # Can be overridden by setting the TORCH_HOME environment variable.
 _DEFAULT_WEIGHTS_DIR = "/app/weights"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ReIDModel:
@@ -114,17 +117,16 @@ class ReIDModel:
                 self._load_torchreid_model()
                 return
             except Exception as e:
-                print(
-                    f"ERROR: Failed to load torchreid model '{self.model_name}': {e}\n"
-                    "Falling back to ResNet50. Re-ID accuracy will be reduced.\n"
+                _LOGGER.error(
+                    f"Failed to load torchreid model '{self.model_name}': {e}. "
+                    "Falling back to ResNet50. Re-ID accuracy will be reduced. "
                     "Check that weights are accessible and torchreid is correctly installed."
                 )
         else:
             if self.model_name in TORCHREID_MODELS and not TORCHREID_AVAILABLE:
-                print(
-                    f"WARNING: torchreid is not installed; cannot load {self.model_name}. "
-                    "Falling back to ResNet50.  Install torchreid for better re-ID accuracy:\n"
-                    "  pip install torchreid"
+                _LOGGER.warning(
+                    f"torchreid is not installed; cannot load {self.model_name}. "
+                    "Falling back to ResNet50. Install torchreid for better re-ID accuracy: pip install torchreid"
                 )
         self._load_resnet50_fallback()
 
@@ -138,9 +140,8 @@ class ReIDModel:
         # weights without hitting the network.
         weights_dir = os.environ.setdefault("TORCH_HOME", _DEFAULT_WEIGHTS_DIR)
 
-        print(
-            f"Loading torchreid model: {self.model_name} "
-            f"(weights dir: {weights_dir}) ..."
+        _LOGGER.info(
+            f"Loading torchreid model: {self.model_name} (weights dir: {weights_dir})..."
         )
         self._extractor = FeatureExtractor(
             model_name=self.model_name,
@@ -148,7 +149,7 @@ class ReIDModel:
             device=str(self.device),
         )
         self._use_torchreid = True
-        print(
+        _LOGGER.info(
             f"Successfully loaded {self.model_name} via torchreid on device: {self.device}"
         )
 
@@ -156,13 +157,13 @@ class ReIDModel:
         """Load the pre-trained ResNet50 feature extractor."""
         from torchvision.models import resnet50
 
-        print("Loading ResNet50 feature extractor...")
+        _LOGGER.info("Loading ResNet50 feature extractor...")
         resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         # Remove the final classification layer to get 2048-dim features
         self.model = nn.Sequential(*list(resnet.children())[:-1])
         self.model = self.model.to(self.device)
         self.model.eval()
-        print(f"Successfully loaded ResNet50 on device: {self.device}")
+        _LOGGER.info(f"Successfully loaded ResNet50 on device: {self.device}")
 
     def extract_embedding(self, base64_image: str) -> np.ndarray:
         """Extract re-identification embedding from a base64-encoded image.
@@ -198,7 +199,7 @@ class ReIDModel:
             return embedding
 
         except Exception as e:
-            print(f"Error extracting embedding from image: {e}")
+            _LOGGER.error(f"Error extracting embedding from image: {e}")
             raise
 
     def extract_embedding_from_file(self, image_path: str) -> np.ndarray:
@@ -232,7 +233,7 @@ class ReIDModel:
             return embedding
 
         except Exception as e:
-            print(f"Error extracting embedding from file {image_path}: {e}")
+            _LOGGER.error(f"Error extracting embedding from file {image_path}: {e}")
             raise
 
     def _extract_torchreid(self, image: Image.Image) -> np.ndarray:

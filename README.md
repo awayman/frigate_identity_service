@@ -44,7 +44,7 @@ fully supported.
 | `FRIGATE_HOST` | `http://localhost:5000` | Frigate HTTP API endpoint |
 | `REID_MODEL` | `osnet_x1_0` | ReID model name (`osnet_x1_0`, `osnet_x0_75`, `osnet_x0_5`, `osnet_x0_25`, `osnet_ibn_x1_0`, `osnet_ain_x1_0`, or `resnet50`) |
 | `REID_DEVICE` | `auto` | Device for ReID (`auto`, `cuda`, `cpu`) |
-| `REID_SIMILARITY_THRESHOLD` | `0.6` | Minimum similarity score for ReID match |
+| `REID_SIMILARITY_THRESHOLD` | `0.75` | Minimum similarity score for ReID match |
 | `EMBEDDINGS_DB_PATH` | `embeddings.json` | Path to store person embeddings |
 | `EMBEDDING_RETENTION_MODE` | `age_prune` | Embedding retention policy: `age_prune`, `full_clear_daily`, or `manual` |
 | `EMBEDDING_MAX_AGE_HOURS` | `48` | Max embedding age before removal when `EMBEDDING_RETENTION_MODE=age_prune` |
@@ -232,6 +232,34 @@ This will check:
 - Frigate API accessibility
 - MQTT topic subscriptions
 - Publish test events
+
+**Event Day Filtering (Real Frigate Tests)**
+
+When running real Frigate integration tests, you can target a specific UTC day:
+
+```powershell
+# Exact UTC date
+$env:FRIGATE_EVENT_DATE = "2026-03-01"
+pytest tests/test_real_frigate.py -v -s
+
+# Relative UTC day (0=today, 1=yesterday)
+Remove-Item Env:FRIGATE_EVENT_DATE -ErrorAction SilentlyContinue
+$env:FRIGATE_EVENT_DAYS_AGO = "1"
+pytest tests/test_real_frigate.py -v -s
+```
+
+Using the integration runner:
+
+```powershell
+python run_integration_tests.py --real-frigate-host http://192.168.1.100:5000 --event-date 2026-03-01
+python run_integration_tests.py --real-frigate-host http://192.168.1.100:5000 --days-ago 1
+```
+
+Set only one filter at a time:
+- `FRIGATE_EVENT_DATE` (format: `YYYY-MM-DD`)
+- `FRIGATE_EVENT_DAYS_AGO` (integer `>= 0`)
+
+For full test workflows, see [TESTING.md](TESTING.md).
 
 **Troubleshooting**
 - Import error for `paho.mqtt.client`: ensure `paho-mqtt` is installed in the active interpreter (`python -m pip install paho-mqtt`).

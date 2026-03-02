@@ -158,7 +158,7 @@ Edit `.env.docker-compose` to modify behavior:
 EVENT_INTERVAL=20          # seconds between event cycles (default: 20)
 
 # Adjust identity service configuration
-SIMILARITY_THRESHOLD=0.6   # Face match confidence threshold
+SIMILARITY_THRESHOLD=0.75  # Face match confidence threshold
 LOGGING_LEVEL=INFO         # DEBUG, INFO, WARNING, ERROR
 
 # Model configuration

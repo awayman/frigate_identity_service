@@ -17,7 +17,7 @@ options:
   frigate_host: "http://homeassistant.local:5000"
   reid_model: "osnet_x1_0"
   reid_device: "cpu"
-  reid_similarity_threshold: 0.6
+  reid_similarity_threshold: 0.75
   embeddings_db_path: "/data/embeddings.json"
   embedding_retention_mode: "age_prune"
   embedding_max_age_hours: 48
