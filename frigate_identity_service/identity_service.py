@@ -96,9 +96,10 @@ def load_ha_options(options_file="/data/options.json"):
         for key, value in options.items():
             if value not in (None, ""):
                 env_key = key.upper()
-                os.environ[env_key] = str(value)
-                loaded_vars[env_key] = str(value)
-                logger.debug("Set %s=%s from options.json (overriding any pre-set value)", env_key, value)
+                if env_key not in os.environ:
+                    os.environ[env_key] = str(value)
+                    loaded_vars[env_key] = str(value)
+                    logger.debug("Set %s=%s from options.json", env_key, value)
 
         logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
         if loaded_vars:
