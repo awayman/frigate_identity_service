@@ -63,11 +63,23 @@ def load_ha_options(options_file="/data/options.json"):
     set by the Home Assistant Supervisor instead.
     """
     path_obj = Path(options_file)
-    logger.debug("Checking for Home Assistant options file at %s", options_file)
+    logger.info("Checking for Home Assistant options file at %s", options_file)
+    
+    # Log any MQTT-related env vars that were already set (these will block options.json)
+    pre_set_mqtt_vars = {}
+    for var in ["MQTT_BROKER", "MQTT_PORT", "MQTT_USERNAME", "MQTT_PASSWORD"]:
+        if var in os.environ:
+            pre_set_mqtt_vars[var] = os.environ[var]
+    if pre_set_mqtt_vars:
+        logger.warning(
+            "MQTT environment variables already set before loading options.json (these will NOT be overridden): %s",
+            list(pre_set_mqtt_vars.keys())
+        )
+    
     if not path_obj.exists():
-        logger.debug("Home Assistant options file not found at %s (expected only in HA addon)", options_file)
+        logger.warning("Home Assistant options file not found at %s - will use environment variables or defaults", options_file)
         return
-    logger.debug("Home Assistant options file found at %s", options_file)
+    logger.info("Home Assistant options file found, attempting to load configuration")
     try:
         stat = path_obj.stat()
         logger.debug("Options file permissions: mode=%o, owner=%d, size=%d", stat.st_mode, stat.st_uid, stat.st_size)
@@ -80,12 +92,20 @@ def load_ha_options(options_file="/data/options.json"):
             logger.debug("Raw options.json contents: %s", raw)
             options = json.loads(raw)
 
+        loaded_vars = {}
         for key, value in options.items():
             env_key = key.upper()
             if env_key not in os.environ and value not in (None, ""):
                 os.environ[env_key] = str(value)
+                loaded_vars[env_key] = value
+            elif env_key in os.environ:
+                logger.debug("Skipping %s (already set in environment)", env_key)
 
         logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
+        if loaded_vars:
+            logger.info("Environment variables set from options: %s", list(loaded_vars.keys()))
+        else:
+            logger.warning("No new environment variables were set from options.json")
     except PermissionError as e:
         logger.error(
             "Cannot read %s: permission denied. Using environment variables instead. "
@@ -113,6 +133,15 @@ MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_CONNECT_RETRIES = int(os.getenv("MQTT_CONNECT_RETRIES", "30"))
 MQTT_CONNECT_RETRY_DELAY = int(os.getenv("MQTT_CONNECT_RETRY_DELAY", "5"))
+
+# Log the actual MQTT configuration being used
+logger.info(
+    "MQTT Configuration: broker=%s:%s, username=%s, auth=%s",
+    MQTT_BROKER,
+    MQTT_PORT,
+    MQTT_USERNAME or "(none)",
+    "yes" if MQTT_USERNAME and MQTT_PASSWORD else "no",
+)
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
