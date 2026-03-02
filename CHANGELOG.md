@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-03-02
+
+### Added
+- Prevent overriding existing environment variables when loading Home Assistant options
+
 ## [0.5.4] - 2026-03-02
 
 ### Added
