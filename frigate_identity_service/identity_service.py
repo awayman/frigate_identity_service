@@ -94,18 +94,17 @@ def load_ha_options(options_file="/data/options.json"):
 
         loaded_vars = {}
         for key, value in options.items():
-            env_key = key.upper()
-            if env_key not in os.environ and value not in (None, ""):
+            if value not in (None, ""):
+                env_key = key.upper()
                 os.environ[env_key] = str(value)
-                loaded_vars[env_key] = value
-            elif env_key in os.environ:
-                logger.debug("Skipping %s (already set in environment)", env_key)
+                loaded_vars[env_key] = str(value)
+                logger.debug("Set %s=%s from options.json (overriding any pre-set value)", env_key, value)
 
         logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
         if loaded_vars:
-            logger.info("Environment variables set from options: %s", list(loaded_vars.keys()))
+            logger.info("Environment variables set from options.json: %s", list(loaded_vars.keys()))
         else:
-            logger.warning("No new environment variables were set from options.json")
+            logger.warning("No valid environment variables were extracted from options.json")
     except PermissionError as e:
         logger.error(
             "Cannot read %s: permission denied. Using environment variables instead. "
