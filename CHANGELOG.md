@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-03-04
+
+### Added
+- Add mqtt_host alias for MQTT_BROKER and update tests
+
 ## [0.5.5] - 2026-03-02
 
 ### Added
