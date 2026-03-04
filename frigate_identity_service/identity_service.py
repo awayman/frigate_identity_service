@@ -63,7 +63,10 @@ def load_ha_options(options_file="/data/options.json"):
     set by the Home Assistant Supervisor instead.
     """
     path_obj = Path(options_file)
-    logger.info("Checking for Home Assistant options file at %s", options_file)
+    logger.info("=" * 80)
+    logger.info("HOME ASSISTANT OPTIONS LOADER - DIAGNOSTIC START")
+    logger.info("=" * 80)
+    logger.info("Checking for Home Assistant options file at: %s", options_file)
     
     # Log any MQTT-related env vars that were already set (these will block options.json)
     pre_set_mqtt_vars = {}
@@ -72,25 +75,43 @@ def load_ha_options(options_file="/data/options.json"):
             pre_set_mqtt_vars[var] = os.environ[var]
     if pre_set_mqtt_vars:
         logger.warning(
-            "MQTT environment variables already set before loading options.json (these will NOT be overridden): %s",
+            "Pre-existing MQTT env vars (these will block options.json overrides): %s",
             list(pre_set_mqtt_vars.keys())
         )
     
     if not path_obj.exists():
-        logger.warning("Home Assistant options file not found at %s - will use environment variables or defaults", options_file)
+        logger.error(
+            "HOME ASSISTANT OPTIONS FILE NOT FOUND at %s. "
+            "Will use environment variables or hardcoded defaults. "
+            "This is normal for non-HA deployments, but indicates a problem in HA add-on mode.",
+            options_file
+        )
+        logger.info("=" * 80)
         return
-    logger.info("Home Assistant options file found, attempting to load configuration")
+    
+    logger.info("✓ Options file EXISTS at: %s", options_file)
+    
+    # Try to stat the file for diagnostics
     try:
         stat = path_obj.stat()
-        logger.debug("Options file permissions: mode=%o, owner=%d, size=%d", stat.st_mode, stat.st_uid, stat.st_size)
+        logger.info("  File size: %d bytes", stat.st_size)
+        logger.info("  File mode: 0o%o", stat.st_mode)
+        logger.info("  Owner UID: %d", stat.st_uid)
+        logger.info("  Owner GID: %d", stat.st_gid)
+        logger.info("  Current process UID: %d", os.getuid() if hasattr(os, 'getuid') else 'N/A')
+        logger.info("  Current process GID: %d", os.getgid() if hasattr(os, 'getgid') else 'N/A')
     except Exception as e:
-        logger.debug("Could not stat options file: %s", e)
+        logger.warning("Could not stat options file: %s", e)
 
     try:
+        logger.info("Attempting to open and parse %s...", options_file)
         with open(options_file, "r") as f:
             raw = f.read()
-            logger.debug("Raw options.json contents: %s", raw)
+            logger.info("✓ Successfully read %d bytes from file", len(raw))
+            logger.info("Raw JSON content: %s", raw[:500])  # Log first 500 chars
             options = json.loads(raw)
+        
+        logger.info("✓ Successfully parsed JSON (%d keys)", len(options))
 
         loaded_vars = {}
         option_to_env = {
@@ -98,29 +119,53 @@ def load_ha_options(options_file="/data/options.json"):
             "mqtt_broker": "MQTT_BROKER",
             "mqtt_server": "MQTT_BROKER",
         }
+        
         for key, value in options.items():
-            if value not in (None, ""):
-                env_key = option_to_env.get(key.lower(), key.upper())
-                if env_key not in os.environ:
-                    os.environ[env_key] = str(value)
-                    loaded_vars[env_key] = str(value)
-                    logger.debug("Set %s=%s from options.json", env_key, value)
+            env_key = option_to_env.get(key.lower(), key.upper())
+            logger.info("Processing option '%s' -> env var '%s' = '%s'", key, env_key, value)
+            
+            if value in (None, ""):
+                logger.info("  → Skipped (empty/None value)")
+                continue
+            
+            if env_key in os.environ:
+                existing = os.environ[env_key]
+                logger.warning("  → Skipped (env var '%s' already set to '%s')", env_key, existing)
+                continue
+            
+            os.environ[env_key] = str(value)
+            loaded_vars[env_key] = str(value)
+            logger.info("  → ✓ Set %s=%s", env_key, value)
 
-        logger.info("Loaded Home Assistant Add-on configuration from %s", options_file)
+        logger.info("=" * 80)
+        logger.info("LOAD RESULT: Successfully loaded %d variables from options.json", len(loaded_vars))
         if loaded_vars:
-            logger.info("Environment variables set from options.json: %s", list(loaded_vars.keys()))
+            logger.info("Variables set: %s", list(loaded_vars.keys()))
         else:
-            logger.warning("No valid environment variables were extracted from options.json")
+            logger.warning("WARNING: No valid environment variables were extracted from options.json")
+        logger.info("=" * 80)
+        
     except PermissionError as e:
-        logger.error(
-            "Cannot read %s: permission denied. Using environment variables instead. "
-            "This may indicate incorrect file permissions or HA Supervisor access issues.",
-            options_file
-        )
+        logger.error("=" * 80)
+        logger.error("PERMISSION ERROR: Cannot read %s", options_file)
+        logger.error("Details: %s", str(e))
+        logger.error("This is a critical issue - the add-on container cannot read HA Supervisor config.")
+        logger.error("Possible causes:")
+        logger.error("  1. Container running as wrong user (not root or frigate_identity)")
+        logger.error("  2. /data mount not properly configured in HA add-on")
+        logger.error("  3. Supervisor issue - check HA logs")
+        logger.error("=" * 80)
     except json.JSONDecodeError as e:
-        logger.warning("Failed to parse %s (invalid JSON): %s. Using environment variables instead.", options_file, e)
+        logger.error("=" * 80)
+        logger.error("JSON PARSE ERROR in %s", options_file)
+        logger.error("Details: %s", str(e))
+        logger.error("The options file exists but contains invalid JSON.")
+        logger.error("=" * 80)
     except Exception as e:
-        logger.warning("Failed to load %s: %s. Using environment variables instead.", options_file, e)
+        logger.error("=" * 80)
+        logger.error("UNEXPECTED ERROR loading %s", options_file)
+        logger.error("Exception: %s", str(e))
+        logger.error("=" * 80)
 
 
 # Load configuration from Home Assistant Add-on options (if running as HA add-on)
@@ -140,13 +185,16 @@ MQTT_CONNECT_RETRIES = int(os.getenv("MQTT_CONNECT_RETRIES", "30"))
 MQTT_CONNECT_RETRY_DELAY = int(os.getenv("MQTT_CONNECT_RETRY_DELAY", "5"))
 
 # Log the actual MQTT configuration being used
-logger.info(
-    "MQTT Configuration: broker=%s:%s, username=%s, auth=%s",
-    MQTT_BROKER,
-    MQTT_PORT,
-    MQTT_USERNAME or "(none)",
-    "yes" if MQTT_USERNAME and MQTT_PASSWORD else "no",
-)
+logger.info("=" * 80)
+logger.info("FINAL MQTT CONFIGURATION:")
+logger.info("  MQTT_BROKER=%s (from env vars: %s)", 
+            MQTT_BROKER,
+            "MQTT_BROKER" if os.getenv("MQTT_BROKER") else "MQTT_HOST or default")
+logger.info("  MQTT_PORT=%d", MQTT_PORT)
+logger.info("  MQTT_USERNAME=%s", MQTT_USERNAME or "(not set)")
+logger.info("  MQTT_PASSWORD=%s", "***" if MQTT_PASSWORD else "(not set)")
+logger.info("  Connection retry settings: %d attempts, %d second delay", MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY)
+logger.info("=" * 80)
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
@@ -321,11 +369,26 @@ validate_config()
 # Warn if running as HA addon but using localhost fallback (indicates config issue)
 ha_options_path = Path("/data/options.json")
 if ha_options_path.exists() and MQTT_BROKER == "localhost":
-    logger.error(
-        "Running as Home Assistant Add-on but MQTT_BROKER is 'localhost'. "
-        "This likely means /data/options.json could not be read by load_ha_options(). "
-        "Check file permissions and HA Supervisor logs for errors."
-    )
+    logger.error("=" * 80)
+    logger.error("CRITICAL CONFIGURATION ISSUE DETECTED")
+    logger.error("=" * 80)
+    logger.error("Home Assistant add-on mode detected:")
+    logger.error("  - /data/options.json EXISTS")
+    logger.error("  - BUT MQTT_BROKER = 'localhost' (the hardcoded default)")
+    logger.error("")
+    logger.error("This means load_ha_options() failed to read the file.")
+    logger.error("Likely root causes:")
+    logger.error("  1. File permissions - check user/group of /data/options.json")
+    logger.error("  2. Container user - add-on container runs as non-root")
+    logger.error("  3. Mount issue - /data may not be accessible in container")
+    logger.error("")
+    logger.error("Check the diagnostics above (HOME ASSISTANT OPTIONS LOADER output)")
+    logger.error("for details about file access attempts.")
+    logger.error("=" * 80)
+elif not ha_options_path.exists():
+    logger.info("Not running as HA add-on (no /data/options.json file found)")
+else:
+    logger.info("✓ Successfully loaded MQTT_BROKER from HA options: %s", MQTT_BROKER)
 
 
 def get_default_embeddings_path():
