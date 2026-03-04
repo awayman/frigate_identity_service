@@ -24,6 +24,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress APScheduler's verbose job execution logs
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
 # TODO: After code is stable, review logging levels and reduce INFO verbosity
 # Currently many detection/event logs are at INFO for debugging the MQTT integration.
 # Consider demoting non-critical events to DEBUG level for production use.
