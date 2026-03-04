@@ -60,13 +60,15 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Different thresholds for facial vs ReID vs continuity
 
 ### Matcher Refactor — Vectorized Matching & Tests
+- [x] Implement recency weighting in matcher (linear/exponential/none)
+- [x] Add optional confidence weighting in matcher
 - [ ] Ensure embeddings are L2-normalized at extraction (`reid_model.extract_embedding`)
 - [ ] Build per-person embedding matrices and recency weight vectors
 - [ ] Replace per-pair scipy loops with NumPy vectorized dot-products for matching
 - [ ] Preserve per-embedding recency weighting (max over weighted similarities)
 - [ ] Add unit tests validating equivalence between loop and vectorized implementations
 - [ ] Add performance/benchmark tests for large galleries (e.g., 1k+ embeddings)
-- [ ] Expose `RECENCY_DECAY_HOURS` as runtime/configurable parameter
+- [x] Expose recency controls via runtime config (`EMBEDDING_MAX_AGE_HOURS`, `RECENCY_DECAY_MODE`, `RECENCY_WEIGHT_FLOOR`)
 - [ ] Keep scipy fallback when NumPy unavailable
 - [ ] Document matching assumptions in `IMPLEMENTATION_SUMMARY.md`
 
@@ -75,14 +77,14 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Reduce confidence 10% per minute after 5 minutes unseen
 - [ ] Reset to 0 after 15 minutes of no detection
 - [ ] Publish decay status in MQTT messages
-- [ ] Home Assistant template sensor for effective confidence
+- [ ] (MOVED_TO_HA) Home Assistant template sensor for effective confidence
 - [ ] Configurable decay rates per person role (child vs adult)
 
 ### Door Camera Logic (Indoor/Outdoor Detection)
 - [ ] Define door cameras in configuration
 - [ ] Detect entry/exit direction based on movement vector
 - [ ] Publish indoor/outdoor state transitions
-- [ ] `binary_sensor.{person}_outdoors` in Home Assistant
+- [ ] (MOVED_TO_HA) `binary_sensor.{person}_outdoors` in Home Assistant
 - [ ] Reset confidence when person goes inside for 10+ minutes
 - [ ] Handle multiple door cameras (front, back, garage)
 - [ ] Account for false positives (person lingers near door)
@@ -94,7 +96,7 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Age-based zone safety rules (5-year-old vs 10-year-old)
 - [ ] Publish role information with identity events
 - [ ] Dynamic role updates without restart
-- [ ] UI configuration in Home Assistant
+- [ ] (MOVED_TO_HA) UI configuration in Home Assistant
 
 ### Embedding Quality Validation
 - [ ] Check embedding vector for anomalies
@@ -125,6 +127,7 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] Authentication/authorization for API access
 
 ### MQTT Reconnection & Error Recovery
+- [x] Startup connect retry logic (`MQTT_CONNECT_RETRIES`, `MQTT_CONNECT_RETRY_DELAY`)
 - [ ] Automatic reconnection on disconnect
 - [ ] Exponential backoff retry logic
 - [ ] Queue messages during disconnection
@@ -180,7 +183,7 @@ Comprehensive list of discussed features and their implementation status.
 - [x] Environment variables via `.env`
 - [x] Example `persons.yaml` created
 - [ ] Load and parse `persons.yaml` in identity service
-- [ ] Validate configuration on startup
+- [x] Validate configuration on startup
 - [ ] Watch for config file changes (hot reload)
 - [ ] Configuration schema validation
 - [ ] Migration tools for config updates
@@ -217,13 +220,13 @@ Comprehensive list of discussed features and their implementation status.
 - [ ] TTS announcements on smart speakers
 
 ### Dashboard & UI
-- [x] Example dashboard YAML created
-- [ ] Custom Lovelace card for person tracking
-- [ ] Visual zone map overlay on camera feeds
-- [ ] Timeline view of detections
-- [ ] Real-time confidence graphs
-- [ ] Interactive zone editing
-- [ ] Mobile-optimized dashboard
+- [x] (MOVED_TO_HA) Example dashboard YAML created
+- [ ] (MOVED_TO_HA) Custom Lovelace card for person tracking
+- [ ] (MOVED_TO_HA) Visual zone map overlay on camera feeds
+- [ ] (MOVED_TO_HA) Timeline view of detections
+- [ ] (MOVED_TO_HA) Real-time confidence graphs
+- [ ] (MOVED_TO_HA) Interactive zone editing
+- [ ] (MOVED_TO_HA) Mobile-optimized dashboard
 
 ### Multi-Home & Cloud Sync
 - [ ] Deploy to multiple locations (grandparents' house)
@@ -250,18 +253,18 @@ Comprehensive list of discussed features and their implementation status.
 
 ### Testing & Quality Assurance
 - [x] Basic system test script (`test_system.py`)
-- [ ] Unit tests for identity service components
-- [ ] Integration tests with mock MQTT
-- [ ] End-to-end test scenarios
+- [x] Unit tests for identity service components
+- [x] Integration tests with mock Frigate/MQTT flows
+- [x] End-to-end test scenarios (real Frigate test suite)
 - [ ] Performance benchmarking
 - [ ] Load testing (multiple cameras/persons)
-- [ ] Mock Frigate event generator
-- [ ] Continuous integration setup
+- [x] Mock Frigate event generator (`frigate_mock/mock_frigate.py`)
+- [x] Continuous integration setup (`.github/workflows/ci.yml`)
 
 ### DevOps & Deployment
-- [ ] Docker Compose setup (all services)
+- [x] Docker Compose setup (all services)
 - [ ] Kubernetes manifests
-- [ ] Home Assistant Supervisor add-on
+- [x] Home Assistant Supervisor add-on
 - [ ] Auto-update mechanism
 - [ ] Backup and restore scripts
 - [ ] Monitoring dashboards (Grafana)
@@ -271,13 +274,22 @@ Comprehensive list of discussed features and their implementation status.
 
 ## 📊 Implementation Status Summary
 
-| Category | Total | Completed | Not Done |
-|----------|-------|-----------|----------|
-| **Core Architecture** | 18 | 18 (100%) | 0 |
-| **Advanced Features** | 47 | 0 (0%) | 47 |
-| **Partially Complete** | 27 | 7 (26%) | 20 |
-| **Future Enhancements** | 50+ | 1 (2%) | 49+ |
-| **TOTAL** | ~142 | ~26 (18%) | ~116 (82%) |
+Status counts in this document have drifted over time and should be treated as directional, not exact.
+
+- Core architecture is complete and stable.
+- Test and release automation are now substantially more complete than shown in older counts.
+- Main gaps remain advanced safety logic, richer tracking semantics, and runtime resiliency features.
+
+---
+
+## 🧹 Obsolete or Moved (Current Design)
+
+The following items are no longer primary work for this repository's current scope and design:
+
+- Home Assistant UI/entity concerns should be tracked in `frigate_identity_ha` (for example: `binary_sensor.{person}_outdoors`, HA template sensors, Lovelace-specific UX items).
+- HTTP configuration endpoint (`/api/config`, `/api/health`, etc.) is currently de-prioritized in favor of env vars + Home Assistant add-on options (`/data/options.json`).
+- `RECENCY_DECAY_HOURS` naming is obsolete; recency behavior is now configured via `EMBEDDING_MAX_AGE_HOURS`, `RECENCY_DECAY_MODE`, and `RECENCY_WEIGHT_FLOOR`.
+- Checklist rows explicitly prefixed with `(MOVED_TO_HA)` should be planned and delivered in the Home Assistant integration repository, not this service repository.
 
 ---
 
@@ -285,10 +297,10 @@ Comprehensive list of discussed features and their implementation status.
 
 ### Phase 1: Core Stability (Next Sprint)
 1. ~~Fix MQTT client compatibility issues (CallbackAPIVersion)~~ ✅ **COMPLETED**
-2. Load and parse `persons.yaml` configuration
+2. Decide and document `persons.yaml` direction for service (implement here vs keep HA-only)
 3. Implement basic confidence decay (time-based)
-4. Add MQTT reconnection logic
-5. Create unit tests for core functions
+4. Add full MQTT disconnect recovery (backoff + reconnect behavior)
+5. Add benchmark coverage for matcher performance
 
 ### Phase 2: Safety Enhancements (Sprint 2)
 1. Implement multi-factor confidence scoring
@@ -298,11 +310,11 @@ Comprehensive list of discussed features and their implementation status.
 5. Notification escalation system
 
 ### Phase 3: User Experience (Sprint 3)
-1. HTTP configuration endpoint
-2. Dashboard improvements
-3. Analytics and reporting
-4. Configuration UI in Home Assistant
-5. Better error messages and debugging
+1. Better error messages and debugging ergonomics
+2. Analytics/reporting foundations for troubleshooting
+3. Optional lightweight health/stats endpoint (only if deployment needs it)
+4. Document HA-repo ownership for UI/dashboard work
+5. Improve operator docs for retention/recovery tuning
 
 ### Phase 4: Advanced Features (Sprint 4+)
 1. Persistent tracking history (SQLite)
@@ -341,4 +353,4 @@ The following are **fully functional** and ready for production use:
 
 ---
 
-**Last Updated:** February 18, 2026
+**Last Updated:** March 3, 2026
