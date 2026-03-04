@@ -55,6 +55,19 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# **IMPORTANT: Running as root for Home Assistant Add-on compatibility**
+#
+# Home Assistant Supervisor writes /data/options.json with restrictive
+# permissions (mode 0600, owned by root UID 0). If this container runs as
+# a non-root user, it will get "Permission denied" when trying to read
+# /data/options.json and cannot load user configuration.
+#
+# This is a known gotcha in HA add-on development:
+# - DO NOT add USER <username> at the end of this Dockerfile
+# - DO NOT create a non-root user for HA add-on deployments
+# - If deploying outside HA (e.g., Docker, K8s), see the commented non-root
+#   section below and uncomment it for security hardening.
+
 # OCI labels
 ARG BUILD_VERSION=0.1.0
 LABEL \
@@ -80,16 +93,36 @@ COPY --from=builder /build/weights /app/weights
 # Copy startup script and make executable
 COPY --chmod=755 run.sh /run.sh
 
-# Create non-root user for security
-RUN groupadd -r frigate_identity && \
-    useradd -r -g frigate_identity -u 1000 frigate_identity && \
-    mkdir -p /data && \
-    chown -R frigate_identity:frigate_identity /app /data && \
-    chmod 755 /app && \
-    chmod 777 /data
+# Create data directory for persistence
+RUN mkdir -p /data && chmod 777 /data
 
-# Switch to non-root user
-USER frigate_identity
+# ============================================================================
+# USER CONFIGURATION - CHOOSE ONE BASED ON DEPLOYMENT MODE
+# ============================================================================
+#
+# FOR HOME ASSISTANT ADD-ON (default, enabled below):
+#   - Run as root (UID 0)
+#   - Can read /data/options.json (HA Supervisor config)  
+#   - HA containers are isolated, security risk is minimal
+#   - This is the standard pattern for all official HA add-ons
+#
+# FOR STANDALONE DOCKER/K8S DEPLOYMENT (optional):
+#   - Uncomment the non-root section below
+#   - Creates unprivileged user 'frigate_identity' (UID 1000)
+#   - Better security posture for internet-facing deployments
+#   - ONLY use this if NOT deploying as HA add-on
+#
+# DO NOT use non-root for HA add-on mode - it will break config loading!
+# ============================================================================
+
+# NOTE: Currently running as root for HA add-on compatibility (see above)
+# RUN groupadd -r frigate_identity && \
+#     useradd -r -g frigate_identity -u 1000 frigate_identity && \
+#     chown -R frigate_identity:frigate_identity /app /data && \
+#     chmod 755 /app && \
+#     chmod 777 /data
+#
+# USER frigate_identity
 
 # Python environment variables
 ENV PYTHONUNBUFFERED=1
