@@ -325,6 +325,19 @@ class TestLoadHaOptions:
         assert os.environ["MQTT_BROKER"] == "my-broker"
         assert os.environ["MQTT_PORT"] == "1884"
 
+    def test_mqtt_host_alias_maps_to_mqtt_broker(self, monkeypatch, tmp_path):
+        """mqtt_host option is accepted as an alias for MQTT_BROKER."""
+        load_ha_options = self._get_load_ha_options()
+        monkeypatch.delenv("MQTT_BROKER", raising=False)
+
+        options = {"mqtt_host": "ha-mosquitto"}
+        options_file = tmp_path / "options.json"
+        options_file.write_text(json.dumps(options))
+
+        load_ha_options(options_file=str(options_file))
+
+        assert os.environ["MQTT_BROKER"] == "ha-mosquitto"
+
     def test_existing_env_not_overwritten(self, monkeypatch, tmp_path):
         """Pre-existing environment variables are not overwritten by the options file."""
         load_ha_options = self._get_load_ha_options()

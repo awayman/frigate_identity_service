@@ -54,9 +54,9 @@ def load_ha_options(options_file="/data/options.json"):
     """Load configuration from Home Assistant Add-on options file.
 
     When deployed as a Home Assistant Add-on, the Supervisor writes the
-    user's add-on configuration to /data/options.json.  This function reads
-    that file and maps each option (e.g. ``mqtt_broker``) to the
-    corresponding upper-case environment variable (e.g. ``MQTT_BROKER``),
+    user's add-on configuration to /data/options.json. This function reads
+    that file and maps each option (e.g. ``mqtt_broker``/``mqtt_host``) to the
+    corresponding environment variable (e.g. ``MQTT_BROKER``),
     but only when the variable has not already been set in the environment.
     
     If the file cannot be read (permissions), environment variables must be
@@ -93,9 +93,14 @@ def load_ha_options(options_file="/data/options.json"):
             options = json.loads(raw)
 
         loaded_vars = {}
+        option_to_env = {
+            "mqtt_host": "MQTT_BROKER",
+            "mqtt_broker": "MQTT_BROKER",
+            "mqtt_server": "MQTT_BROKER",
+        }
         for key, value in options.items():
             if value not in (None, ""):
-                env_key = key.upper()
+                env_key = option_to_env.get(key.lower(), key.upper())
                 if env_key not in os.environ:
                     os.environ[env_key] = str(value)
                     loaded_vars[env_key] = str(value)
@@ -127,7 +132,7 @@ if test_env_path.exists():
     logger.info("Loading configuration from %s", test_env_path)
     load_env_file(str(test_env_path))
 
-MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_BROKER = os.getenv("MQTT_BROKER") or os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
