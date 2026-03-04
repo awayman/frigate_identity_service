@@ -1030,10 +1030,17 @@ def schedule_embedding_maintenance():
 
     def _heartbeat():
         """Log service health status every 5 minutes"""
+        uptime_seconds = int(time.time() - service_start_time)
+        hours = uptime_seconds // 3600
+        minutes = (uptime_seconds % 3600) // 60
+        seconds = uptime_seconds % 60
+        uptime_str = f"{hours}h {minutes}m {seconds}s"
+        
         store_stats = embedding_store.get_stats()
         mqtt_status = "connected" if client.is_connected() else "disconnected"
         logger.info(
-            "[HEARTBEAT] Service running | Persons tracked: %d | Embeddings: %d | MQTT: %s | ReID: %s",
+            "[HEARTBEAT] Service running | Uptime: %s | Persons tracked: %d | Embeddings: %d | MQTT: %s | ReID: %s",
+            uptime_str,
             store_stats["persons"],
             store_stats["embeddings"],
             mqtt_status,
@@ -1071,6 +1078,9 @@ def schedule_embedding_maintenance():
     logger.info("[SCHEDULER] Health heartbeat scheduled (every 5 minutes)")
     return scheduler
 
+
+# Track service start time for uptime calculation
+service_start_time = time.time()
 
 client = get_mqtt_client()
 client.on_connect = on_connect
