@@ -1,8 +1,20 @@
-**Frigate Identity Service**
+# Frigate Identity Service
 
 Lightweight ReID service that provides person identification continuity for Frigate. Uses facial recognition as the primary identity source and ReID (re-identification) to maintain identity when faces are not visible.
 
-**Architecture:**
+## Table of Contents
+
+- [Architecture](#architecture)
+- [ReID Model Selection](#reid-model-selection)
+- [Environment Variables](#environment-variables)
+- [MQTT Topics](#mqtt-topics)
+- [Snapshot Flow](#snapshot-flow)
+- [Home Assistant Add-on](#home-assistant-add-on)
+- [Debug Logging](#debug-logging)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+
+## Architecture
 
 - **Input Layer (MQTT + Frigate API):**
   - Subscribes to `frigate/events` and `frigate/tracked_object_update` for person identity signals
@@ -29,7 +41,7 @@ Lightweight ReID service that provides person identification continuity for Frig
   - Nightly debug-log cleanup and periodic health heartbeat run via `APScheduler`
   - Vehicle snapshots emit `identity/vehicle/detected` and retained vehicle snapshot topics for dashboard usage
 
-**ReID Model Selection:**
+## ReID Model Selection
 
 The service uses [torchreid](https://github.com/KaiyangZhou/deep-person-reid) to load
 dedicated person re-identification models such as OSNet.  Set the `REID_MODEL`
@@ -50,7 +62,7 @@ If torchreid is not installed and a torchreid model is requested, the service
 automatically falls back to ResNet50.  Both GPU (`cuda`) and CPU-only modes are
 fully supported.
 
-**Environment Variables:**
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -74,9 +86,9 @@ fully supported.
 | `DEBUG_SAVE_EMBEDDINGS` | `false` | Include full embeddings in debug JSON (high storage) |
 | `DEBUG_RETENTION_DAYS` | `7` | How many days to retain debug logs before auto-delete |
 
-**MQTT Topics:**
+## MQTT Topics
 
-**Subscriptions:**
+### Subscriptions
 - `frigate/events` - Tracked object updates (new/update/end); contains face recognition via `sub_label` field ([Frigate docs](https://docs.frigate.video/integrations/mqtt#frigateevents))
 - `frigate/tracked_object_update` - Face recognition and LPR metadata updates ([Frigate docs](https://docs.frigate.video/integrations/mqtt#frigatetracked_object_update))
 - `frigate/+/person/snapshot` - Person snapshots (fast display)
@@ -84,14 +96,14 @@ fully supported.
 - `frigate/+/truck/snapshot` - Vehicle detection
 - `frigate_identity/debug/set` - Runtime debug logging toggle control
 
-**Publications:**
+### Publications
 - `identity/person/{person_id}` - Person identity events
 - `identity/snapshots/{person_id}` - Person-specific snapshot images
 - `identity/snapshots/{person_id}/metadata` - Snapshot correlation metadata
 - `identity/vehicle/detected` - Vehicle detection events
 - `frigate_identity/debug/state` - Current debug logging state
 
-**Snapshot Flow (Detection → Dashboard)**
+## Snapshot Flow (Detection → Dashboard)
 
 Simplified flowchart:
 
@@ -168,7 +180,7 @@ sequenceDiagram
   S->>M: frigate_identity/debug/state
 ```
 
-**Files:**
+## Files
 - **`identity_service.py`**: Main service consuming Frigate events and publishing identity messages. See [identity_service.py](identity_service.py).
 - **`requirements.txt`**: Python dependencies (GPU-capable). See [requirements.txt](requirements.txt).
 - **`requirements-cpu.txt`**: CPU-only Python dependencies for Home Assistant Add-on. See [requirements-cpu.txt](requirements-cpu.txt).
@@ -176,7 +188,7 @@ sequenceDiagram
 - **`config.yaml`**: Home Assistant Add-on manifest. See [config.yaml](config.yaml).
 - **`run.sh`**: Container entry point used by the Home Assistant Add-on. See [run.sh](run.sh).
 
-**Local setup (Windows PowerShell)**
+## Local setup (Windows PowerShell)
 
 1. Create and activate a virtual environment:
 
@@ -200,7 +212,7 @@ If activation fails, install into the venv directly:
 .\.venv\bin\python.exe identity_service.py
 ```
 
-**Docker**
+## Docker
 
 Build and run the container (CPU-only, suitable for most deployments):
 
@@ -243,7 +255,7 @@ EMBEDDING_RETENTION_MODE=full_clear_daily
 EMBEDDING_FULL_CLEAR_TIME=00:00
 ```
 
-**Home Assistant Add-on**
+## Home Assistant Add-on
 
 This repository can be used directly as a Home Assistant Add-on repository.  GPU acceleration is not required when deployed as an Add-on; the service falls back to CPU-based ReID automatically.
 
@@ -257,11 +269,11 @@ Configuration is written by the Supervisor to `/data/options.json` and is read a
 
 > **Note:** GPU acceleration is not available in Home Assistant Add-on deployments.  The ReID model runs on CPU, which is sufficient for most home use cases.  For GPU-accelerated deployments, use the standalone Docker image built with `--build-arg USE_GPU=true`.
 
-**Debug Logging**
+## Debug Logging
 
 If you experience misidentifications, debug logging helps diagnose whether issues stem from Frigate's facial recognition or the ReID model.
 
-**Enable Debug Logging:**
+### Enable Debug Logging
 
 Via environment variable:
 ```bash
@@ -278,17 +290,17 @@ mosquitto_pub -t frigate_identity/debug/set -m '{"enabled": true}'
 
 The service publishes retained debug status to `frigate_identity/debug/state` so dashboards/automations can read current state after restart.
 
-**Storage:**
+### Storage
 - Snapshots: `/data/debug/snapshots/{date}/`
 - Logs: `/data/debug/logs/{date}_*.jsonl` (JSONL format for easy parsing)
 - Automatic cleanup: Logs older than `DEBUG_RETENTION_DAYS` are deleted daily at 1 AM
 
-**Logs Generated:**
+### Logs Generated
 - `{date}_facial_recognition.jsonl` - Frigate facial recognition events with snapshots
 - `{date}_reid_matches.jsonl` - ReID matching results (successful and failed matches)
 - `{date}_correlation_issues.jsonl` - MQTT snapshot correlation warnings (multi-person scenarios)
 
-**Analyze Logs:**
+### Analyze Logs
 
 ```bash
 python analyze_debug_logs.py \
@@ -302,7 +314,7 @@ Output:
 - `reports/summary.csv` - All events in CSV format for spreadsheet analysis
 - `reports/metrics.json` - Aggregated statistics
 
-**Dashboard Example:**
+### Dashboard Example
 
 The [examples/debug_dashboard.yaml](examples/debug_dashboard.yaml) provides a Home Assistant dashboard for managing debug mode and analyzing results. Import it via Home Assistant's dashboard editor.
 
@@ -311,13 +323,13 @@ The [examples/debug_dashboard.yaml](examples/debug_dashboard.yaml) provides a Ho
 - Select the workspace interpreter (Command Palette → "Python: Select Interpreter") and choose the `.venv` interpreter.
 - If the editor still flags imports, reload the window or restart the Python language server.
 
-**Configuration Files**
+## Configuration Files
 
 - `.env` - Environment configuration (copy from `.env.example`)
 - `persons.yaml` - Person roles, ages, and supervision requirements
 - `embeddings.json` - Stored person embeddings (auto-generated)
 
-**Testing**
+## Testing
 
 Run the test script to validate your setup:
 
@@ -331,7 +343,7 @@ This will check:
 - MQTT topic subscriptions
 - Publish test events
 
-**Event Day Filtering (Real Frigate Tests)**
+### Event Day Filtering (Real Frigate Tests)
 
 When running real Frigate integration tests, you can target a specific UTC day:
 
@@ -359,12 +371,12 @@ Set only one filter at a time:
 
 For full test workflows, see [TESTING.md](TESTING.md).
 
-**Troubleshooting**
+## Troubleshooting
 - Import error for `paho.mqtt.client`: ensure `paho-mqtt` is installed in the active interpreter (`python -m pip install paho-mqtt`).
 - Unable to connect to MQTT broker: check `MQTT_BROKER`/`MQTT_PORT` env vars and network reachability.
 - No snapshots appearing: verify Frigate MQTT config has `crop: true` enabled
 
-**Home Assistant Integration**
+## Home Assistant Integration
 
 The Home Assistant integration has been moved to a separate repository for HACS compatibility:
 
