@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-03-07
+
+### Added
+- Add flowcharts to README for snapshot flow and sequence diagram
+- Add service uptime logging to heartbeat status
+- Update TODO list with completed tasks and move Home Assistant related items to separate tracking
+- Suppress verbose job execution logs from APScheduler
+- Refactor Home Assistant options loading for improved logging and diagnostics
+
 ## [0.5.8] - 2026-03-04
 
 ### Added
