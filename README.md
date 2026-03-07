@@ -72,6 +72,60 @@ fully supported.
 - `identity/snapshots/{person_id}/metadata` - Snapshot correlation metadata
 - `identity/vehicle/detected` - Vehicle detection events
 
+**Snapshot Flow (Detection → Dashboard)**
+
+Simplified flowchart (README-friendly):
+
+```mermaid
+flowchart LR
+  A[Frigate person detection] --> B[MQTT: frigate/events]
+  A --> C[MQTT: frigate/camera/person/snapshot]
+
+  B --> D[Identity Service identifies person<br/>facial_recognition or reid_model]
+  D --> E[Publish identity/person/person_id]
+  D --> F[Queue camera+person for correlation]
+
+  C --> G[Identity Service correlates snapshot to queued person]
+  G --> H[Publish identity/snapshots/person_id]
+
+  E --> I[HA sensor updates person status/location]
+  H --> J[HA camera updates snapshot image]
+
+  I --> K[Dashboard card]
+  J --> K
+```
+
+Sequence diagram (topic-by-topic):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant F as Frigate
+  participant M as MQTT Broker
+  participant S as Identity Service
+  participant H as HA Integration
+  participant D as Lovelace Dashboard
+
+  F->>M: frigate/events (event_id, camera, sub_label?)
+  M->>S: frigate/events
+  S->>S: facial_recognition or ReID decision\n(using event_id + API snapshot for identity path)
+  S->>M: identity/person/{person_id}
+
+  F->>M: frigate/{camera}/person/snapshot (JPEG)
+  M->>S: frigate/{camera}/person/snapshot
+  S->>S: correlate by camera + time window
+  S->>M: identity/snapshots/{person_id} (JPEG)
+  S->>M: identity/snapshots/{person_id}/metadata
+
+  M->>H: identity/person/{person_id}
+  H->>H: update registry + location entities
+
+  M->>H: identity/snapshots/{person_id}
+  H->>H: update MQTT camera entity (snapshot_source=mqtt)
+
+  H->>D: render status + latest snapshot
+```
+
 **Files:**
 - **`identity_service.py`**: Main service consuming Frigate events and publishing identity messages. See [identity_service.py](identity_service.py).
 - **`requirements.txt`**: Python dependencies (GPU-capable). See [requirements.txt](requirements.txt).
