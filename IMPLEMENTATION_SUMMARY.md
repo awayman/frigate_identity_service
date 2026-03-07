@@ -204,6 +204,6 @@ The following Pylance warnings are **expected and safe to ignore**:
 ## Questions?
 
 Refer to:
-- [CONFIGURATION_EXAMPLES.md](frigate_identity_ha/frigate-identity-ha/CONFIGURATION_EXAMPLES.md) for Home Assistant setup
-- [README.md](frigate_identity_service/README.md) for Identity Service deployment
+- [CONFIGURATION_EXAMPLES.md](https://github.com/awayman/frigate-identity-ha/blob/main/CONFIGURATION_EXAMPLES.md) for Home Assistant setup
+- [README.md](README.md) for Identity Service deployment
 - GitHub issues for support

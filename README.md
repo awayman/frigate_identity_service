@@ -181,12 +181,12 @@ sequenceDiagram
 ```
 
 ## Files
-- **`identity_service.py`**: Main service consuming Frigate events and publishing identity messages. See [identity_service.py](identity_service.py).
-- **`requirements.txt`**: Python dependencies (GPU-capable). See [requirements.txt](requirements.txt).
-- **`requirements-cpu.txt`**: CPU-only Python dependencies for Home Assistant Add-on. See [requirements-cpu.txt](requirements-cpu.txt).
-- **`Dockerfile`**: Container image build (CPU-only by default; pass `--build-arg USE_GPU=true` for GPU). See [Dockerfile](Dockerfile).
-- **`config.yaml`**: Home Assistant Add-on manifest. See [config.yaml](config.yaml).
-- **`run.sh`**: Container entry point used by the Home Assistant Add-on. See [run.sh](run.sh).
+- **`identity_service.py`**: Main service consuming Frigate events and publishing identity messages. See [identity_service.py](frigate_identity_service/identity_service.py).
+- **`requirements.txt`**: Python dependencies (GPU-capable). See [requirements.txt](frigate_identity_service/requirements.txt).
+- **`requirements-cpu.txt`**: CPU-only Python dependencies for Home Assistant Add-on. See [requirements-cpu.txt](frigate_identity_service/requirements-cpu.txt).
+- **`Dockerfile`**: Container image build (CPU-only by default; pass `--build-arg USE_GPU=true` for GPU). See [Dockerfile](frigate_identity_service/Dockerfile).
+- **`config.yaml`**: Home Assistant Add-on manifest. See [config.yaml](frigate_identity_service/config.yaml).
+- **`run.sh`**: Container entry point used by the Home Assistant Add-on. See [run.sh](frigate_identity_service/run.sh).
 
 ## Local setup (Windows PowerShell)
 
@@ -194,22 +194,22 @@ sequenceDiagram
 
 ```powershell
 python -m venv .venv
-& .\.venv\bin\Activate.ps1
+& .\.venv\Scripts\Activate.ps1
 ```
 
 2. Install dependencies and run:
 
 ```powershell
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python identity_service.py
+python -m pip install -r frigate_identity_service/requirements.txt
+python frigate_identity_service/identity_service.py
 ```
 
 If activation fails, install into the venv directly:
 
 ```powershell
-.\.venv\bin\python.exe -m pip install -r requirements.txt
-.\.venv\bin\python.exe identity_service.py
+.\.venv\Scripts\python.exe -m pip install -r frigate_identity_service/requirements.txt
+.\.venv\Scripts\python.exe frigate_identity_service/identity_service.py
 ```
 
 ## Docker
@@ -316,7 +316,7 @@ Output:
 
 ### Dashboard Example
 
-The [examples/debug_dashboard.yaml](examples/debug_dashboard.yaml) provides a Home Assistant dashboard for managing debug mode and analyzing results. Import it via Home Assistant's dashboard editor.
+For dashboard examples and UI setup, see the Frigate Identity HA repository: [Frigate Identity HA](https://github.com/awayman/frigate-identity-ha).
 
 
 
