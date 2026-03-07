@@ -4,13 +4,30 @@ Lightweight ReID service that provides person identification continuity for Frig
 
 **Architecture:**
 
-- **Two-Tier Snapshot System:**
-  - MQTT snapshots for fast dashboard display (~50-100ms latency)
-  - API snapshots for accurate embedding storage (~300-500ms latency)
-  
-- **Identity Sources:**
-  - Frigate facial recognition (primary, highest confidence)
-  - ReID model matching (continuity when face not visible)
+- **Input Layer (MQTT + Frigate API):**
+  - Subscribes to `frigate/events` and `frigate/tracked_object_update` for person identity signals
+  - Subscribes to `frigate/+/person/snapshot` for fast person snapshots, plus car/truck snapshot topics for vehicle events
+  - Uses Frigate HTTP API snapshots for the accurate identity/embedding path
+
+- **Identity Decision Layer (Face-first, ReID fallback):**
+  - **Primary:** Frigate face recognition (`sub_label` from events or `tracked_object_update` face payload)
+  - **Fallback:** ReID embedding extraction + cosine similarity matching against stored embeddings
+  - Publishes identity updates to `identity/person/{person_id}`
+
+- **Two Snapshot Paths (Speed vs Accuracy):**
+  - **Fast display path:** MQTT snapshot is temporally correlated to recent per-camera detections, then published to `identity/snapshots/{person_id}`
+  - **Accurate learning path:** API snapshot is used for embedding extraction and persistence in `EmbeddingStore`
+  - Correlation metadata is published to `identity/snapshots/{person_id}/metadata`
+
+- **Persistence and Matching:**
+  - `EmbeddingStore` keeps multiple recent embeddings per person in `embeddings.json` (recency-aware format)
+  - `EmbeddingMatcher` supports recency decay (`linear`, `exponential`, `none`) and optional confidence weighting
+  - Retention policy is scheduler-driven: `age_prune`, `full_clear_daily`, or `manual`
+
+- **Operations and Observability:**
+  - Debug logging can be toggled at runtime via `frigate_identity/debug/set`
+  - Nightly debug-log cleanup and periodic health heartbeat run via `APScheduler`
+  - Vehicle snapshots emit `identity/vehicle/detected` and retained vehicle snapshot topics for dashboard usage
 
 **ReID Model Selection:**
 
@@ -65,34 +82,43 @@ fully supported.
 - `frigate/+/person/snapshot` - Person snapshots (fast display)
 - `frigate/+/car/snapshot` - Vehicle detection
 - `frigate/+/truck/snapshot` - Vehicle detection
+- `frigate_identity/debug/set` - Runtime debug logging toggle control
 
 **Publications:**
 - `identity/person/{person_id}` - Person identity events
 - `identity/snapshots/{person_id}` - Person-specific snapshot images
 - `identity/snapshots/{person_id}/metadata` - Snapshot correlation metadata
 - `identity/vehicle/detected` - Vehicle detection events
+- `frigate_identity/debug/state` - Current debug logging state
 
 **Snapshot Flow (Detection → Dashboard)**
 
-Simplified flowchart (README-friendly):
+Simplified flowchart:
 
 ```mermaid
 flowchart LR
   A[Frigate person detection] --> B[MQTT: frigate/events]
-  A --> C[MQTT: frigate/camera/person/snapshot]
+  A --> C[MQTT: frigate/tracked_object_update face]
+  A --> D[MQTT: frigate/camera/person/snapshot]
 
-  B --> D[Identity Service identifies person<br/>facial_recognition or reid_model]
-  D --> E[Publish identity/person/person_id]
-  D --> F[Queue camera+person for correlation]
+  B --> E[Identity Service face-first decision<br/>facial_recognition or reid_model]
+  C --> E
+  E --> F[Publish identity/person/person_id]
+  E --> G[Queue camera+person for snapshot correlation]
+  E --> H[Fetch API snapshot and store embedding]
 
-  C --> G[Identity Service correlates snapshot to queued person]
-  G --> H[Publish identity/snapshots/person_id]
+  D --> I[Correlate MQTT snapshot to queued person]
+  I --> J[Publish identity/snapshots/person_id]
+  I --> K[Publish identity/snapshots/person_id/metadata]
 
-  E --> I[HA sensor updates person status/location]
-  H --> J[HA camera updates snapshot image]
+  F --> L[HA sensor updates person status/location]
+  J --> M[HA camera updates snapshot image]
 
-  I --> K[Dashboard card]
-  J --> K
+  L --> N[Dashboard card]
+  M --> N
+
+  O[HA automation or service call] --> P[MQTT: frigate_identity/debug/set]
+  P --> Q[Identity Service toggles debug logger]
 ```
 
 Sequence diagram (topic-by-topic):
@@ -101,6 +127,7 @@ Sequence diagram (topic-by-topic):
 sequenceDiagram
   autonumber
   participant F as Frigate
+  participant A as HA Automation/User
   participant M as MQTT Broker
   participant S as Identity Service
   participant H as HA Integration
@@ -108,7 +135,13 @@ sequenceDiagram
 
   F->>M: frigate/events (event_id, camera, sub_label?)
   M->>S: frigate/events
-  S->>S: facial_recognition or ReID decision\n(using event_id + API snapshot for identity path)
+  S->>S: face-first decision\n(sub_label first, else ReID via API snapshot)
+  S->>S: store/reinforce embedding when identity is known
+  S->>M: identity/person/{person_id}
+
+  F->>M: frigate/tracked_object_update (type=face, name, score)
+  M->>S: frigate/tracked_object_update
+  S->>S: update identity queue + optional embedding learning
   S->>M: identity/person/{person_id}
 
   F->>M: frigate/{camera}/person/snapshot (JPEG)
@@ -117,6 +150,11 @@ sequenceDiagram
   S->>M: identity/snapshots/{person_id} (JPEG)
   S->>M: identity/snapshots/{person_id}/metadata
 
+  F->>M: frigate/{camera}/car|truck/snapshot (JPEG)
+  M->>S: vehicle snapshot
+  S->>M: identity/vehicle/detected
+  S->>M: identity/snapshots/vehicle_{camera}
+
   M->>H: identity/person/{person_id}
   H->>H: update registry + location entities
 
@@ -124,6 +162,10 @@ sequenceDiagram
   H->>H: update MQTT camera entity (snapshot_source=mqtt)
 
   H->>D: render status + latest snapshot
+
+  A->>M: frigate_identity/debug/set {enabled: true|false}
+  M->>S: debug control message
+  S->>M: frigate_identity/debug/state
 ```
 
 **Files:**
@@ -233,6 +275,8 @@ Via Home Assistant Add-on UI or MQTT:
 ```bash
 mosquitto_pub -t frigate_identity/debug/set -m '{"enabled": true}'
 ```
+
+The service publishes retained debug status to `frigate_identity/debug/state` so dashboards/automations can read current state after restart.
 
 **Storage:**
 - Snapshots: `/data/debug/snapshots/{date}/`
