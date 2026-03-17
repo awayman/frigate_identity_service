@@ -73,7 +73,9 @@ class DebugLogger:
             self._ensure_dirs()
             logger.info(f"[DEBUG] Debug logging ENABLED at {self.debug_path}")
         else:
-            logger.info(f"[DEBUG] Debug logging disabled (base path: {self.debug_path})")
+            logger.info(
+                f"[DEBUG] Debug logging disabled (base path: {self.debug_path})"
+            )
 
     def _ensure_dirs(self):
         """Create debug directories if they don't exist."""
@@ -126,7 +128,9 @@ class DebugLogger:
         try:
             # Save snapshot
             snapshot_path = (
-                self.snapshots_dir / date_str / f"{timestamp_str}_{camera}_{person_id}.jpg"
+                self.snapshots_dir
+                / date_str
+                / f"{timestamp_str}_{camera}_{person_id}.jpg"
             )
             snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -23,7 +23,7 @@ def pytest_configure(config):
 @pytest.fixture
 def frigate_host():
     """Get Frigate host URL from FRIGATE_HOST environment variable.
-    
+
     Returns None if not set, causing tests to skip.
     """
     host = os.getenv("FRIGATE_HOST")
@@ -35,27 +35,28 @@ def frigate_host():
 @pytest.fixture
 def frigate_session(frigate_host):
     """Create a requests session for Frigate API calls with retry logic.
-    
+
     Automatically handles:
     - SSL verification (disabled for self-signed certs)
     - API key authentication (from FRIGATE_API_KEY if set)
     - Timeout and retry logic
     """
     session = requests.Session()
-    
+
     # Disable SSL warnings for self-signed certs
     import urllib3
+
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     session.verify = False
-    
+
     # Add API key if configured
     api_key = os.getenv("FRIGATE_API_KEY")
     if api_key:
         session.headers.update({"Authorization": f"Bearer {api_key}"})
-    
+
     # Add timeout to all requests
     session.timeout = 10
-    
+
     yield session
     session.close()
 
@@ -63,7 +64,7 @@ def frigate_session(frigate_host):
 @pytest.fixture
 def frigate_config(frigate_session, frigate_host):
     """Validate Frigate is reachable and return its config.
-    
+
     This fixture ensures the Frigate API is actually accessible before tests run.
     """
     try:
@@ -77,7 +78,7 @@ def frigate_config(frigate_session, frigate_host):
 @pytest.fixture
 def output_dir():
     """Create and return the tests/output directory for test artifacts.
-    
+
     Used for HTML reports and other test outputs.
     """
     output_path = Path(__file__).parent / "tests" / "output"
@@ -151,25 +152,25 @@ def frigate_event_filters():
 @pytest.fixture
 def temp_embedding_store(output_dir):
     """Create a temporary EmbeddingStore for isolated testing.
-    
+
     Returns an EmbeddingStore instance with a temporary database file
     that is automatically cleaned up after the test completes.
-    
+
     This ensures tests don't interfere with each other or with production data.
     """
     from embedding_store import EmbeddingStore
-    
+
     temp_db_path = output_dir / "test_embeddings.json"
-    
+
     # Remove existing temp db if present
     if temp_db_path.exists():
         temp_db_path.unlink()
-    
+
     # Create and return the temporary store
     store = EmbeddingStore(str(temp_db_path))
-    
+
     yield store
-    
+
     # Cleanup after test
     if temp_db_path.exists():
         temp_db_path.unlink()

@@ -169,9 +169,7 @@ class TestMatcher:
             "person3": (np.array([0.0, 1.0, 0.0]), "camera3", 0.7),
         }
 
-        top_matches = matcher.find_top_k_matches(
-            query, stored, k=2, threshold=0.0
-        )
+        top_matches = matcher.find_top_k_matches(query, stored, k=2, threshold=0.0)
         assert len(top_matches) <= 2
         assert top_matches[0][1] >= top_matches[1][1]
 

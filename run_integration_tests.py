@@ -553,8 +553,8 @@ def main():
         type=str,
         default=None,
         help="URL of real Frigate instance to test against "
-             "(e.g., http://192.168.1.100:5000). "
-             "If set, runs tests/test_real_frigate.py instead of mock tests.",
+        "(e.g., http://192.168.1.100:5000). "
+        "If set, runs tests/test_real_frigate.py instead of mock tests.",
     )
     parser.add_argument(
         "--real-frigate-api-key",
@@ -575,7 +575,7 @@ def main():
         default=None,
         help="UTC day offset for event query (0=today, 1=yesterday)",
     )
-    
+
     args = parser.parse_args()
 
     if args.days_ago is not None and args.days_ago < 0:
@@ -586,7 +586,7 @@ def main():
             datetime.strptime(args.event_date, "%Y-%m-%d")
         except ValueError:
             parser.error("--event-date must be in YYYY-MM-DD format")
-    
+
     # If real Frigate URL provided, run real Frigate tests instead of mock tests
     if args.real_frigate_host:
         return run_real_frigate_tests(
@@ -595,7 +595,7 @@ def main():
             args.event_date,
             args.days_ago,
         )
-    
+
     # Otherwise, run standard mock integration tests
     runner = IntegrationTestRunner()
     return runner.run_all_tests()
@@ -608,13 +608,13 @@ def run_real_frigate_tests(
     days_ago: int | None = None,
 ) -> int:
     """Run integration tests against a real Frigate instance.
-    
+
     Args:
         frigate_host: URL of Frigate instance
         api_key: Optional API key for authentication
         event_date: Optional UTC day filter in YYYY-MM-DD
         days_ago: Optional UTC day offset filter (0=today, 1=yesterday)
-    
+
     Returns:
         Exit code (0 = success, 1 = failure)
     """
@@ -661,7 +661,7 @@ def run_real_frigate_tests(
                 f" (received: {selected_event_date!r}){Colors.ENDC}"
             )
             return 1
-    
+
     # Set environment variables for pytest
     os.environ["FRIGATE_HOST"] = frigate_host
     if api_key:
@@ -675,18 +675,16 @@ def run_real_frigate_tests(
         os.environ["FRIGATE_EVENT_DATE"] = selected_event_date
     elif selected_days_ago is not None:
         os.environ["FRIGATE_EVENT_DAYS_AGO"] = str(selected_days_ago)
-    
+
     print(f"{Colors.OKBLUE}ℹ Using Frigate host: {frigate_host}{Colors.ENDC}\n")
     if selected_event_date is not None:
-        print(
-            f"{Colors.OKBLUE}ℹ Event day (UTC): {selected_event_date}{Colors.ENDC}"
-        )
+        print(f"{Colors.OKBLUE}ℹ Event day (UTC): {selected_event_date}{Colors.ENDC}")
     elif selected_days_ago is not None:
         print(
             f"{Colors.OKBLUE}ℹ Event day offset (UTC): "
             f"{selected_days_ago} day(s) ago{Colors.ENDC}"
         )
-    
+
     # Run pytest on the real Frigate tests
     try:
         result = subprocess.run(
@@ -701,22 +699,25 @@ def run_real_frigate_tests(
             ],
             cwd=Path(__file__).parent,
         )
-        
+
         if result.returncode == 0:
-            report_path = Path(__file__).parent / "tests" / "output" / "real_frigate_report.html"
+            report_path = (
+                Path(__file__).parent / "tests" / "output" / "real_frigate_report.html"
+            )
             if report_path.exists():
                 print(f"\n{Colors.OKGREEN}✓ Tests passed!{Colors.ENDC}")
                 print(f"{Colors.OKBLUE}ℹ HTML report: {report_path}{Colors.ENDC}")
-                
+
                 # On Windows, offer to open the report
                 if sys.platform == "win32":
                     import webbrowser
+
                     webbrowser.open(f"file:///{report_path}")
             return 0
         else:
             print(f"\n{Colors.FAIL}✗ Tests failed{Colors.ENDC}")
             return 1
-            
+
     except Exception as e:
         print(f"{Colors.FAIL}✗ Error running tests: {e}{Colors.ENDC}")
         return 1

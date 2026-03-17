@@ -122,7 +122,9 @@ def categorize_commits(commits: list[str]) -> dict[str, list[str]]:
     # Conventional commit prefixes
     feat_pattern = r"^feat(?:\(([^)]*)\))?:\s*(.+)$"
     fix_pattern = r"^fix(?:\(([^)]*)\))?:\s*(.+)$"
-    refactor_pattern = r"^(?:refactor|perf|change|update|style)(?:\(([^)]*)\))?:\s*(.+)$"
+    refactor_pattern = (
+        r"^(?:refactor|perf|change|update|style)(?:\(([^)]*)\))?:\s*(.+)$"
+    )
     remove_pattern = r"^(?:remove|deprecate|revert)(?:\(([^)]*)\))?:\s*(.+)$"
 
     def _fmt(scope: str | None, message: str) -> str:
@@ -225,13 +227,19 @@ def update_addon_changelog(new_version: str, categories: dict[str, list[str]]) -
 
     new_section = "\n".join(lines).strip() + "\n"
 
-    existing = ADDON_CHANGELOG.read_text(encoding="utf-8") if ADDON_CHANGELOG.exists() else ""
+    existing = (
+        ADDON_CHANGELOG.read_text(encoding="utf-8") if ADDON_CHANGELOG.exists() else ""
+    )
     version_header = f"## {new_version}"
     if version_header in existing:
-        print(f"  Skipped {ADDON_CHANGELOG.relative_to(REPO_ROOT)} (already has {version_header})")
+        print(
+            f"  Skipped {ADDON_CHANGELOG.relative_to(REPO_ROOT)} (already has {version_header})"
+        )
         return
 
-    updated = f"{new_section}\n{existing.strip()}\n" if existing.strip() else new_section
+    updated = (
+        f"{new_section}\n{existing.strip()}\n" if existing.strip() else new_section
+    )
     ADDON_CHANGELOG.write_text(updated, encoding="utf-8")
     print(f"  Updated {ADDON_CHANGELOG.relative_to(REPO_ROOT)} -> {version_header}")
 

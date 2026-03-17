@@ -61,13 +61,13 @@ def load_ha_options(options_file="/data/options.json"):
     that file and maps each option (e.g. ``mqtt_broker``/``mqtt_host``) to the
     corresponding environment variable (e.g. ``MQTT_BROKER``),
     but only when the variable has not already been set in the environment.
-    
+
     If the file cannot be read (permissions), environment variables must be
     set by the Home Assistant Supervisor instead.
     """
     path_obj = Path(options_file)
     logger.info("Loading Home Assistant add-on configuration from %s", options_file)
-    
+
     # Log any MQTT-related env vars that were already set (these will block options.json)
     pre_set_mqtt_vars = {}
     for var in ["MQTT_BROKER", "MQTT_PORT", "MQTT_USERNAME", "MQTT_PASSWORD"]:
@@ -76,21 +76,23 @@ def load_ha_options(options_file="/data/options.json"):
     if pre_set_mqtt_vars:
         logger.debug(
             "Pre-existing MQTT env vars will block options.json overrides: %s",
-            list(pre_set_mqtt_vars.keys())
+            list(pre_set_mqtt_vars.keys()),
         )
-    
+
     if not path_obj.exists():
-        logger.debug("Options file not found at %s (normal for non-HA deployments)", options_file)
+        logger.debug(
+            "Options file not found at %s (normal for non-HA deployments)", options_file
+        )
         return
-    
+
     logger.debug("Options file found")
-    
+
     try:
         logger.debug("Reading options file...")
         with open(options_file, "r") as f:
             raw = f.read()
             options = json.loads(raw)
-        
+
         logger.debug("Successfully parsed options.json (%d keys)", len(options))
 
         loaded_vars = {}
@@ -99,39 +101,49 @@ def load_ha_options(options_file="/data/options.json"):
             "mqtt_broker": "MQTT_BROKER",
             "mqtt_server": "MQTT_BROKER",
         }
-        
+
         # Sensitive keys that should not be logged in plaintext
         sensitive_keys = {"mqtt_password", "mqtt_username", "frigate_password"}
-        
+
         for key, value in options.items():
             env_key = option_to_env.get(key.lower(), key.upper())
-            
+
             # Log with redaction for sensitive values
             if key.lower() in sensitive_keys:
-                logger.debug("Processing option '%s' -> env var '%s' (***redacted***)", key, env_key)
+                logger.debug(
+                    "Processing option '%s' -> env var '%s' (***redacted***)",
+                    key,
+                    env_key,
+                )
             else:
-                logger.debug("Processing option '%s' -> env var '%s' = %s", key, env_key, value)
-            
+                logger.debug(
+                    "Processing option '%s' -> env var '%s' = %s", key, env_key, value
+                )
+
             if value in (None, ""):
                 continue
-            
+
             if env_key in os.environ:
-                logger.debug("Env var '%s' already set, skipping options.json value", env_key)
+                logger.debug(
+                    "Env var '%s' already set, skipping options.json value", env_key
+                )
                 continue
-            
+
             os.environ[env_key] = str(value)
             loaded_vars[env_key] = str(value)
 
-        logger.info("Loaded %d configuration variables from options.json", len(loaded_vars))
+        logger.info(
+            "Loaded %d configuration variables from options.json", len(loaded_vars)
+        )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Variables set: %s", list(loaded_vars.keys()))
-        
-    except PermissionError as e:
+
+    except PermissionError:
         logger.error(
             "Cannot read %s: Permission denied. "
             "Container may be running as non-root user. "
             "For HA add-on mode, ensure Dockerfile runs as root (UID 0).",
-            options_file
+            options_file,
         )
     except json.JSONDecodeError as e:
         logger.error("Failed to parse %s (invalid JSON): %s", options_file, e)
@@ -156,10 +168,12 @@ MQTT_CONNECT_RETRIES = int(os.getenv("MQTT_CONNECT_RETRIES", "30"))
 MQTT_CONNECT_RETRY_DELAY = int(os.getenv("MQTT_CONNECT_RETRY_DELAY", "5"))
 
 # Log the actual MQTT configuration being used
-logger.info("MQTT Configuration: broker=%s:%d, auth=%s",
-            MQTT_BROKER,
-            MQTT_PORT,
-            "yes" if MQTT_USERNAME and MQTT_PASSWORD else "no")
+logger.info(
+    "MQTT Configuration: broker=%s:%d, auth=%s",
+    MQTT_BROKER,
+    MQTT_PORT,
+    "yes" if MQTT_USERNAME and MQTT_PASSWORD else "no",
+)
 FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
@@ -168,34 +182,42 @@ REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.75")
 
 def validate_config():
     """Validate configuration values and exit with clear error if invalid.
-    
+
     This function validates ranges and types for critical configuration values,
     logging the sanitized config (with secrets redacted) for debugging purposes.
     """
     errors = []
-    
+
     # Validate MQTT port
     if not (1 <= MQTT_PORT <= 65535):
         errors.append(f"MQTT_PORT must be between 1 and 65535, got {MQTT_PORT}")
-    
+
     # Validate Frigate host URL format
     if not FRIGATE_HOST.startswith(("http://", "https://")):
-        errors.append(f"FRIGATE_HOST must start with http:// or https://, got '{FRIGATE_HOST}'")
-    
+        errors.append(
+            f"FRIGATE_HOST must start with http:// or https://, got '{FRIGATE_HOST}'"
+        )
+
     # Validate ReID similarity threshold
     if not (0.0 <= REID_SIMILARITY_THRESHOLD <= 1.0):
-        errors.append(f"REID_SIMILARITY_THRESHOLD must be between 0.0 and 1.0, got {REID_SIMILARITY_THRESHOLD}")
-    
+        errors.append(
+            f"REID_SIMILARITY_THRESHOLD must be between 0.0 and 1.0, got {REID_SIMILARITY_THRESHOLD}"
+        )
+
     # Validate snapshot correlation window
     snapshot_window = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
     if not (0.1 <= snapshot_window <= 10.0):
-        errors.append(f"SNAPSHOT_CORRELATION_WINDOW must be between 0.1 and 10.0, got {snapshot_window}")
-    
+        errors.append(
+            f"SNAPSHOT_CORRELATION_WINDOW must be between 0.1 and 10.0, got {snapshot_window}"
+        )
+
     # Validate max tracked persons
     max_persons = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
     if not (1 <= max_persons <= 20):
-        errors.append(f"MAX_TRACKED_PERSONS_PER_CAMERA must be between 1 and 20, got {max_persons}")
-    
+        errors.append(
+            f"MAX_TRACKED_PERSONS_PER_CAMERA must be between 1 and 20, got {max_persons}"
+        )
+
     # Validate debug retention days
     retention = int(os.getenv("DEBUG_RETENTION_DAYS", "7"))
     if not (1 <= retention <= 90):
@@ -214,8 +236,7 @@ def validate_config():
     max_age_hours = float(os.getenv("EMBEDDING_MAX_AGE_HOURS", "48"))
     if not (1 <= max_age_hours <= 720):
         errors.append(
-            "EMBEDDING_MAX_AGE_HOURS must be between 1 and 720, "
-            f"got {max_age_hours}"
+            f"EMBEDDING_MAX_AGE_HOURS must be between 1 and 720, got {max_age_hours}"
         )
 
     # Validate prune interval
@@ -258,13 +279,15 @@ def validate_config():
         )
 
     # Validate use_confidence_weighting
-    use_confidence_weighting_str = os.getenv("USE_CONFIDENCE_WEIGHTING", "false").lower()
+    use_confidence_weighting_str = os.getenv(
+        "USE_CONFIDENCE_WEIGHTING", "false"
+    ).lower()
     if use_confidence_weighting_str not in {"true", "false"}:
         errors.append(
             "USE_CONFIDENCE_WEIGHTING must be 'true' or 'false', "
             f"got '{use_confidence_weighting_str}'"
         )
-    
+
     # If any validation errors, log and exit
     if errors:
         logger.error("Configuration validation failed:")
@@ -272,24 +295,37 @@ def validate_config():
             logger.error("  - %s", error)
         logger.error("Please fix the configuration and restart the service.")
         sys.exit(1)
-    
+
     # Log sanitized config (with secrets redacted)
     mqtt_password_display = "***" if MQTT_PASSWORD else "(not set)"
     logger.info("Configuration validated successfully:")
-    logger.info("  MQTT: %s:%d (user: %s, password: %s)", 
-                MQTT_BROKER, MQTT_PORT, MQTT_USERNAME or "(not set)", mqtt_password_display)
+    logger.info(
+        "  MQTT: %s:%d (user: %s, password: %s)",
+        MQTT_BROKER,
+        MQTT_PORT,
+        MQTT_USERNAME or "(not set)",
+        mqtt_password_display,
+    )
     logger.info("  Frigate: %s", FRIGATE_HOST)
-    logger.info("  ReID: model=%s, device=%s, threshold=%.2f", 
-                REID_MODEL, REID_DEVICE, REID_SIMILARITY_THRESHOLD)
-    
+    logger.info(
+        "  ReID: model=%s, device=%s, threshold=%.2f",
+        REID_MODEL,
+        REID_DEVICE,
+        REID_SIMILARITY_THRESHOLD,
+    )
+
     # Determine default paths for display
     embeddings_path = os.getenv("EMBEDDINGS_DB_PATH") or (
-        "/data/embeddings.json" if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")) else "embeddings.json"
+        "/data/embeddings.json"
+        if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"))
+        else "embeddings.json"
     )
     debug_path = os.getenv("DEBUG_LOG_PATH") or (
-        "/data/debug" if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")) else "debug"
+        "/data/debug"
+        if (os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"))
+        else "debug"
     )
-    
+
     logger.info("  Embeddings: %s", embeddings_path)
     logger.info(
         "  Embedding retention: mode=%s, max_age_hours=%.1f, prune_interval_minutes=%d, full_clear_time=%s",
@@ -298,14 +334,14 @@ def validate_config():
         prune_interval,
         full_clear_time,
     )
-    
+
     logger.info(
         "  Recency weighting: decay_mode=%s, weight_floor=%.2f, use_confidence=%s",
         recency_decay_mode,
         recency_weight_floor,
         use_confidence_weighting_str,
     )
-    
+
     # Log retention mode explanation
     if retention_mode == "age_prune":
         logger.info(
@@ -322,10 +358,12 @@ def validate_config():
         logger.info(
             "  → No automatic embedding cleanup (manual mode, embeddings persist until explicitly cleared)"
         )
-    
-    logger.info("  Debug: enabled=%s, path=%s", 
-                os.getenv("DEBUG_LOGGING_ENABLED", "false"), 
-                debug_path)
+
+    logger.info(
+        "  Debug: enabled=%s, path=%s",
+        os.getenv("DEBUG_LOGGING_ENABLED", "false"),
+        debug_path,
+    )
 
 
 # Validate configuration
@@ -384,14 +422,20 @@ EMBEDDING_PRUNE_INTERVAL_MINUTES = int(
 EMBEDDING_FULL_CLEAR_TIME = os.getenv("EMBEDDING_FULL_CLEAR_TIME", "00:00")
 RECENCY_DECAY_MODE = os.getenv("RECENCY_DECAY_MODE", "linear").lower()
 RECENCY_WEIGHT_FLOOR = float(os.getenv("RECENCY_WEIGHT_FLOOR", "0.3"))
-USE_CONFIDENCE_WEIGHTING = os.getenv("USE_CONFIDENCE_WEIGHTING", "true").lower() == "true"
+USE_CONFIDENCE_WEIGHTING = (
+    os.getenv("USE_CONFIDENCE_WEIGHTING", "true").lower() == "true"
+)
 
 # Initialize modules
 logger.info("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
 
-logger.info("Initializing embedding matcher (decay_mode=%s, floor=%.2f, use_confidence=%s)...",
-            RECENCY_DECAY_MODE, RECENCY_WEIGHT_FLOOR, USE_CONFIDENCE_WEIGHTING)
+logger.info(
+    "Initializing embedding matcher (decay_mode=%s, floor=%.2f, use_confidence=%s)...",
+    RECENCY_DECAY_MODE,
+    RECENCY_WEIGHT_FLOOR,
+    USE_CONFIDENCE_WEIGHTING,
+)
 embedding_matcher = EmbeddingMatcher(
     max_age_hours=EMBEDDING_MAX_AGE_HOURS,
     decay_mode=RECENCY_DECAY_MODE,
@@ -1035,7 +1079,7 @@ def schedule_embedding_maintenance():
         minutes = (uptime_seconds % 3600) // 60
         seconds = uptime_seconds % 60
         uptime_str = f"{hours}h {minutes}m {seconds}s"
-        
+
         store_stats = embedding_store.get_stats()
         mqtt_status = "connected" if client.is_connected() else "disconnected"
         logger.info(
@@ -1060,7 +1104,9 @@ def schedule_embedding_maintenance():
         )
     elif EMBEDDING_RETENTION_MODE == "full_clear_daily":
         clear_hour, clear_minute = _parse_clock_time(EMBEDDING_FULL_CLEAR_TIME)
-        scheduler.add_job(_clear_embeddings, "cron", hour=clear_hour, minute=clear_minute)
+        scheduler.add_job(
+            _clear_embeddings, "cron", hour=clear_hour, minute=clear_minute
+        )
         logger.info(
             "[SCHEDULER] Embedding retention mode=full_clear_daily (runs at %02d:%02d)",
             clear_hour,

@@ -21,7 +21,6 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
-import base64
 from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -151,10 +150,10 @@ class DebugLogAnalyzer:
         """
         facial_recs = logs["facial_recognition"]
         reid_matches = logs["reid_matches"]
-        reid_no_matches = [
-            r for r in reid_matches if r.get("match_found") is False
+        reid_no_matches = [r for r in reid_matches if r.get("match_found") is False]
+        reid_with_matches = [
+            r for r in reid_matches if r.get("match_found") is not False
         ]
-        reid_with_matches = [r for r in reid_matches if r.get("match_found") is not False]
         correlation_issues = logs["correlation_issues"]
 
         # Group by camera and person
@@ -181,9 +180,7 @@ class DebugLogAnalyzer:
 
         # Identify potential misidentifications (ReID near threshold)
         near_threshold = [
-            e
-            for e in reid_with_matches
-            if 0.55 <= e.get("chosen_similarity", 0) < 0.70
+            e for e in reid_with_matches if 0.55 <= e.get("chosen_similarity", 0) < 0.70
         ]
 
         metrics = {
@@ -192,9 +189,7 @@ class DebugLogAnalyzer:
             "reid_matching_events": len(reid_with_matches),
             "reid_no_match_events": len(reid_no_matches),
             "reid_no_match_rate": (
-                len(reid_no_matches) / len(reid_matches)
-                if reid_matches
-                else 0
+                len(reid_no_matches) / len(reid_matches) if reid_matches else 0
             ),
             "correlation_issues_count": len(correlation_issues),
             "unique_cameras": len(cameras),
@@ -267,43 +262,49 @@ class DebugLogAnalyzer:
             "</style>",
             "</head>",
             "<body>",
-            f"<h1>Frigate Identity Service Debug Report</h1>",
+            "<h1>Frigate Identity Service Debug Report</h1>",
             f"<p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>",
         ]
 
         # Summary metrics
-        html_parts.extend([
-            "<h2>Summary</h2>",
-            f"<div class='metric'><div class='metric-label'>Total Events</div><div class='metric-value'>{metrics['total_events']}</div></div>",
-            f"<div class='metric'><div class='metric-label'>Facial Recognition Events</div><div class='metric-value'>{metrics['facial_recognition_events']}</div></div>",
-            f"<div class='metric'><div class='metric-label'>ReID Matches</div><div class='metric-value'>{metrics['reid_matching_events']}</div></div>",
-            f"<div class='metric'><div class='metric-label'>ReID No-Match Rate</div><div class='metric-value'>{metrics['reid_no_match_rate']:.1%}</div></div>",
-            f"<div class='metric'><div class='metric-label'>Unique Cameras</div><div class='metric-value'>{metrics['unique_cameras']}</div></div>",
-            f"<div class='metric'><div class='metric-label'>Unique Persons</div><div class='metric-value'>{metrics['unique_persons']}</div></div>",
-            f"<div class='metric'><div class='metric-label'>Multi-Person Correlation Issues</div><div class='metric-value'>{metrics['correlation_issues_count']}</div></div>",
-        ])
+        html_parts.extend(
+            [
+                "<h2>Summary</h2>",
+                f"<div class='metric'><div class='metric-label'>Total Events</div><div class='metric-value'>{metrics['total_events']}</div></div>",
+                f"<div class='metric'><div class='metric-label'>Facial Recognition Events</div><div class='metric-value'>{metrics['facial_recognition_events']}</div></div>",
+                f"<div class='metric'><div class='metric-label'>ReID Matches</div><div class='metric-value'>{metrics['reid_matching_events']}</div></div>",
+                f"<div class='metric'><div class='metric-label'>ReID No-Match Rate</div><div class='metric-value'>{metrics['reid_no_match_rate']:.1%}</div></div>",
+                f"<div class='metric'><div class='metric-label'>Unique Cameras</div><div class='metric-value'>{metrics['unique_cameras']}</div></div>",
+                f"<div class='metric'><div class='metric-label'>Unique Persons</div><div class='metric-value'>{metrics['unique_persons']}</div></div>",
+                f"<div class='metric'><div class='metric-label'>Multi-Person Correlation Issues</div><div class='metric-value'>{metrics['correlation_issues_count']}</div></div>",
+            ]
+        )
 
         # Confidence analysis
-        html_parts.extend([
-            "<h2>Confidence Analysis</h2>",
-            "<h3>Facial Recognition Confidence</h3>",
-            f"<p>Mean: {metrics['facial_recognition_confidences']['mean']:.3f}, "
-            f"Min: {metrics['facial_recognition_confidences']['min']:.3f}, "
-            f"Max: {metrics['facial_recognition_confidences']['max']:.3f}</p>",
-            "<h3>ReID Confidence</h3>",
-            f"<p>Mean: {metrics['reid_confidences']['mean']:.3f}, "
-            f"Min: {metrics['reid_confidences']['min']:.3f}, "
-            f"Max: {metrics['reid_confidences']['max']:.3f}</p>",
-        ])
+        html_parts.extend(
+            [
+                "<h2>Confidence Analysis</h2>",
+                "<h3>Facial Recognition Confidence</h3>",
+                f"<p>Mean: {metrics['facial_recognition_confidences']['mean']:.3f}, "
+                f"Min: {metrics['facial_recognition_confidences']['min']:.3f}, "
+                f"Max: {metrics['facial_recognition_confidences']['max']:.3f}</p>",
+                "<h3>ReID Confidence</h3>",
+                f"<p>Mean: {metrics['reid_confidences']['mean']:.3f}, "
+                f"Min: {metrics['reid_confidences']['min']:.3f}, "
+                f"Max: {metrics['reid_confidences']['max']:.3f}</p>",
+            ]
+        )
 
         # Potential misidentifications
         if metrics["potential_misidentifications_count"] > 0:
-            html_parts.extend([
-                "<h2>Potential Misidentifications (Confidence 0.55-0.70)</h2>",
-                f"<p>{metrics['potential_misidentifications_count']} events found near threshold</p>",
-                "<table>",
-                "<tr><th>Timestamp</th><th>Camera</th><th>Person</th><th>Confidence</th><th>Top Matches</th></tr>",
-            ])
+            html_parts.extend(
+                [
+                    "<h2>Potential Misidentifications (Confidence 0.55-0.70)</h2>",
+                    f"<p>{metrics['potential_misidentifications_count']} events found near threshold</p>",
+                    "<table>",
+                    "<tr><th>Timestamp</th><th>Camera</th><th>Person</th><th>Confidence</th><th>Top Matches</th></tr>",
+                ]
+            )
 
             for m in metrics["potential_misidentifications"][:50]:  # Limit to 50
                 matches_str = ", ".join(
@@ -323,11 +324,13 @@ class DebugLogAnalyzer:
             html_parts.append("</table>")
 
         # Cameras and persons
-        html_parts.extend([
-            "<h2>Cameras and Persons</h2>",
-            "<table>",
-            "<tr><th>Camera</th><th>Unique Persons</th></tr>",
-        ])
+        html_parts.extend(
+            [
+                "<h2>Cameras and Persons</h2>",
+                "<table>",
+                "<tr><th>Camera</th><th>Unique Persons</th></tr>",
+            ]
+        )
 
         for camera in sorted(metrics["cameras"]):
             persons = metrics["persons_by_camera"].get(camera, [])
@@ -335,11 +338,13 @@ class DebugLogAnalyzer:
                 f"<tr><td>{camera}</td><td>{len(persons)}: {', '.join(sorted(persons))}</td></tr>"
             )
 
-        html_parts.extend([
-            "</table>",
-            "</body>",
-            "</html>",
-        ])
+        html_parts.extend(
+            [
+                "</table>",
+                "</body>",
+                "</html>",
+            ]
+        )
 
         html_content = "\n".join(html_parts)
 
@@ -363,47 +368,53 @@ class DebugLogAnalyzer:
             writer = csv.writer(f)
 
             # Header
-            writer.writerow([
-                "Timestamp",
-                "Type",
-                "Camera",
-                "Person ID",
-                "Confidence",
-                "Source",
-                "Notes",
-            ])
+            writer.writerow(
+                [
+                    "Timestamp",
+                    "Type",
+                    "Camera",
+                    "Person ID",
+                    "Confidence",
+                    "Source",
+                    "Notes",
+                ]
+            )
 
             # Facial recognition events
             for event in logs["facial_recognition"]:
-                writer.writerow([
-                    event.get("timestamp", ""),
-                    "Facial Recognition",
-                    event.get("camera", ""),
-                    event.get("person_id", ""),
-                    f"{event.get('confidence', 0):.3f}",
-                    "Frigate",
-                    "",
-                ])
+                writer.writerow(
+                    [
+                        event.get("timestamp", ""),
+                        "Facial Recognition",
+                        event.get("camera", ""),
+                        event.get("person_id", ""),
+                        f"{event.get('confidence', 0):.3f}",
+                        "Frigate",
+                        "",
+                    ]
+                )
 
             # ReID events
             for event in logs["reid_matches"]:
                 match_found = event.get("match_found", True)
-                chosen_sim = event.get('chosen_similarity')
+                chosen_sim = event.get("chosen_similarity")
                 if chosen_sim is None:
                     chosen_sim = 0
-                writer.writerow([
-                    event.get("timestamp", ""),
-                    "ReID Match" if match_found else "ReID No-Match",
-                    event.get("camera", ""),
-                    event.get("chosen_person_id", "N/A"),
-                    f"{chosen_sim:.3f}",
-                    "ReID Model",
-                    (
-                        f"Best match: {event.get('best_similarity', 0):.3f} (threshold: {event.get('threshold', 0):.3f})"
-                        if not match_found
-                        else ""
-                    ),
-                ])
+                writer.writerow(
+                    [
+                        event.get("timestamp", ""),
+                        "ReID Match" if match_found else "ReID No-Match",
+                        event.get("camera", ""),
+                        event.get("chosen_person_id", "N/A"),
+                        f"{chosen_sim:.3f}",
+                        "ReID Model",
+                        (
+                            f"Best match: {event.get('best_similarity', 0):.3f} (threshold: {event.get('threshold', 0):.3f})"
+                            if not match_found
+                            else ""
+                        ),
+                    ]
+                )
 
         logger.info(f"CSV report written to {output_path}")
 

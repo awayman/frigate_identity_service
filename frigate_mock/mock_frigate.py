@@ -17,7 +17,6 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict
 
@@ -132,7 +131,6 @@ def encode_image_to_base64(image_data: bytes) -> str:
 
 def create_event_payload(person: Dict[str, Any], event_index: int) -> Dict[str, Any]:
     """Create a realistic Frigate event payload."""
-    timestamp = time.time()
     event_id = f"{person['id']}_event_{event_index}"
 
     return {
@@ -201,7 +199,13 @@ def create_snapshot_payload(
     }
 
 
-def on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, rc: int, properties: Any = None) -> None:
+def on_connect(
+    client: mqtt.Client,
+    userdata: Any,
+    connect_flags: Any,
+    rc: int,
+    properties: Any = None,
+) -> None:
     """MQTT connection callback."""
     if rc == 0:
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
@@ -209,7 +213,13 @@ def on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, rc: int, 
         logger.error(f"Failed to connect to MQTT broker, return code {rc}")
 
 
-def on_disconnect(client: mqtt.Client, userdata: Any, disconnect_flags: Any, rc: int, properties: Any = None) -> None:
+def on_disconnect(
+    client: mqtt.Client,
+    userdata: Any,
+    disconnect_flags: Any,
+    rc: int,
+    properties: Any = None,
+) -> None:
     """MQTT disconnection callback."""
     if rc != 0:
         logger.warning(f"Unexpected MQTT disconnection, return code {rc}")
@@ -217,7 +227,9 @@ def on_disconnect(client: mqtt.Client, userdata: Any, disconnect_flags: Any, rc:
         logger.info("Disconnected from MQTT broker")
 
 
-def on_publish(client: mqtt.Client, userdata: Any, mid: int, properties: Any = None, rc: int = None) -> None:
+def on_publish(
+    client: mqtt.Client, userdata: Any, mid: int, properties: Any = None, rc: int = None
+) -> None:
     """MQTT publish callback (for paho-mqtt 2.x compatibility)."""
     pass  # Silent logging for publish events
 
@@ -244,9 +256,7 @@ def publish_event_cycle(client: mqtt.Client, event_index: int) -> None:
 
             # Publish snapshot with image
             snapshot_payload = create_snapshot_payload(person, image_base64)
-            snapshot_topic = (
-                f"{MQTT_TOPIC_PREFIX}/{CAMERA_NAME}/person/snapshot"
-            )
+            snapshot_topic = f"{MQTT_TOPIC_PREFIX}/{CAMERA_NAME}/person/snapshot"
             client.publish(snapshot_topic, json.dumps(snapshot_payload), qos=1)
             logger.info(
                 f"Published snapshot to {snapshot_topic}: {person['id']} "
@@ -262,7 +272,7 @@ def publish_event_cycle(client: mqtt.Client, event_index: int) -> None:
 
 def main() -> None:
     """Main loop for mock Frigate service."""
-    logger.info(f"Mock Frigate service starting...")
+    logger.info("Mock Frigate service starting...")
     logger.info(f"MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
     logger.info(f"Event interval: {EVENT_INTERVAL} seconds")
     logger.info(f"Camera: {CAMERA_NAME}")
@@ -290,7 +300,9 @@ def main() -> None:
                 )
                 time.sleep(5)
             else:
-                logger.error(f"Failed to connect after {max_retries} attempts. Exiting.")
+                logger.error(
+                    f"Failed to connect after {max_retries} attempts. Exiting."
+                )
                 exit(1)
 
     # Main event publishing loop

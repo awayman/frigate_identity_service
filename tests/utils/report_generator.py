@@ -9,7 +9,7 @@ Generates interactive HTML reports showing:
 
 import base64
 from urllib.parse import quote
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 from pathlib import Path
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MatchResult:
     """Result of a person identification match."""
+
     event_id: str
     snapshot_bytes: bytes
     matched_person: str
@@ -30,12 +31,14 @@ class MatchResult:
     is_mismatch: bool = False
     expected_person: Optional[str] = None
     source: str = "unknown"  # "facial_recognition", "reid_model", or "unknown"
-    alternatives: Optional[List[tuple]] = None  # List of (person, confidence) alternatives
+    alternatives: Optional[List[tuple]] = (
+        None  # List of (person, confidence) alternatives
+    )
 
 
 class MatchReport:
     """Accumulates and generates HTML reports for person identification matches."""
-    
+
     def __init__(self, frigate_host: Optional[str] = None):
         """Initialize an empty match report."""
         self.matches: List[MatchResult] = []
@@ -56,7 +59,7 @@ class MatchReport:
             return None
         safe_event_id = quote(event_id, safe="")
         return f"{self.frigate_host}/api/events/{safe_event_id}/snapshot.jpg?crop=1&quality=95"
-    
+
     def add_match(
         self,
         event_id: str,
@@ -69,7 +72,7 @@ class MatchReport:
         alternatives: Optional[List[tuple]] = None,
     ):
         """Add a successful person identification match to the report.
-        
+
         Args:
             event_id: Frigate event ID
             snapshot_bytes: Raw JPEG image bytes
@@ -92,8 +95,10 @@ class MatchReport:
         )
         self.matches.append(match)
         self.total_processed += 1
-        logger.info(f"Added match: {person_id} (confidence: {confidence:.2%}) on {camera} [source: {source}]")
-    
+        logger.info(
+            f"Added match: {person_id} (confidence: {confidence:.2%}) on {camera} [source: {source}]"
+        )
+
     def add_mismatch(
         self,
         event_id: str,
@@ -106,7 +111,7 @@ class MatchReport:
         source: str = "unknown",
     ):
         """Add a misidentified person (ground truth available).
-        
+
         Args:
             event_id: Frigate event ID
             snapshot_bytes: Raw JPEG image bytes
@@ -134,45 +139,45 @@ class MatchReport:
             f"Mismatch: expected {expected_person}, got {matched_person} "
             f"(confidence: {confidence:.2%}) [source: {source}]"
         )
-    
+
     def generate_html(self, output_path: Path) -> Path:
         """Generate an interactive HTML report.
-        
+
         Creates a self-contained HTML file with:
         - Inline base64-encoded images (no external file references)
         - Person identification results with confidence badges
         - Summary statistics (total processed, accuracy, etc.)
         - Color-coded results (green for matches, red for mismatches)
-        
+
         Args:
             output_path: Path where HTML file should be saved
-        
+
         Returns:
             Path to the generated HTML file
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         accuracy = self._calculate_accuracy()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         html = self._build_html(accuracy, timestamp)
-        
+
         output_path.write_text(html, encoding="utf-8")
         logger.info(f"Generated HTML report: {output_path}")
-        
+
         return output_path
-    
+
     def _calculate_accuracy(self) -> float:
         """Calculate accuracy as (matches / total_processed)."""
         if self.total_processed == 0:
             return 0.0
         return len(self.matches) / self.total_processed
-    
+
     def _build_html(self, accuracy: float, timestamp: str) -> str:
         """Build the HTML content for the report."""
         accuracy_pct = accuracy * 100
-        
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -474,40 +479,40 @@ class MatchReport:
 
         # Add notes/warnings section (if any)
         if self.notes:
-            html += "<div class=\"section\">\n"
+            html += '<div class="section">\n'
             for note in self.notes:
                 html += (
-                    "<div class=\"notice-banner\">"
+                    '<div class="notice-banner">'
                     "<strong>⚠ Notice:</strong> "
                     f"{note}"
                     "</div>\n"
                 )
             html += "</div>\n"
-        
+
         # Add matches section
         if self.matches:
-            html += "<div class=\"section\">\n"
+            html += '<div class="section">\n'
             html += "<h2>✓ Successful Matches</h2>\n"
-            html += "<div class=\"match-grid\">\n"
+            html += '<div class="match-grid">\n'
             for match in self.matches:
                 html += self._build_match_card(match)
             html += "</div>\n</div>\n"
-        
+
         # Add mismatches section
         if self.mismatches:
-            html += "<div class=\"section\">\n"
+            html += '<div class="section">\n'
             html += "<h2>✗ Mismatches</h2>\n"
-            html += "<div class=\"match-grid\">\n"
+            html += '<div class="match-grid">\n'
             for mismatch in self.mismatches:
                 html += self._build_match_card(mismatch)
             html += "</div>\n</div>\n"
-        
+
         # Add empty state if no results
         if not self.matches and not self.mismatches:
             html += """<div class="empty-state">
                 <p>No results to display</p>
             </div>"""
-        
+
         html += """
         </div>
     </div>
@@ -515,18 +520,22 @@ class MatchReport:
 </html>
 """
         return html
-    
+
     def _build_match_card(self, result: MatchResult) -> str:
         """Build HTML for a single match card."""
         # Convert image bytes to base64 data URI
         img_base64 = base64.b64encode(result.snapshot_bytes).decode("utf-8")
         img_src = f"data:image/jpeg;base64,{img_base64}"
-        
+
         # Determine confidence badge color
-        confidence_class = "confidence-high" if result.confidence >= 0.7 else \
-                          "confidence-medium" if result.confidence >= 0.5 else \
-                          "confidence-low"
-        
+        confidence_class = (
+            "confidence-high"
+            if result.confidence >= 0.7
+            else "confidence-medium"
+            if result.confidence >= 0.5
+            else "confidence-low"
+        )
+
         # Determine source badge
         source_display = {
             "facial_recognition": ("👤 Facial Recognition", "source-facial"),
@@ -534,14 +543,14 @@ class MatchReport:
             "simulated_learning": ("🎓 Learned (Simulated)", "source-facial"),
             "unknown": ("❓ Unknown", "source-unknown"),
         }.get(result.source, ("Unknown", "source-unknown"))
-        
+
         source_text, source_class = source_display
-        
+
         # Build card HTML
         card_class = "mismatch" if result.is_mismatch else "match"
         badge_class = "mismatch" if result.is_mismatch else "match"
         label = "✗ Mismatch" if result.is_mismatch else "✓ Match"
-        
+
         frigate_snapshot_url = self._frigate_snapshot_url(result.event_id)
         image_html = f'<img src="{img_src}" alt="Snapshot" class="match-image">'
         event_html = f'<div class="event-id">Event: {result.event_id}</div>'
@@ -554,7 +563,7 @@ class MatchReport:
             event_html = (
                 f'<div class="event-id">Event: '
                 f'<a href="{frigate_snapshot_url}" target="_blank" rel="noopener noreferrer">'
-                f'{result.event_id}</a></div>'
+                f"{result.event_id}</a></div>"
             )
 
         html = f"""<div class="match-card {card_class}">
@@ -572,22 +581,28 @@ class MatchReport:
             <p><strong>Camera:</strong> {result.camera}</p>
             <p><strong>Time:</strong> {result.timestamp}</p>
 """
-        
+
         if result.is_mismatch and result.expected_person:
             html += f'            <p><strong>Expected:</strong> <span class="mismatch-expected">{result.expected_person}</span></p>\n'
-        
+
         html += f"""            {event_html}
     """
-        
+
         # Add alternatives section if available (for ReID matches)
         if result.alternatives and len(result.alternatives) > 0:
             html += '            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">\n'
             html += '                <p style="font-size: 0.75em; color: #999; margin-bottom: 5px;"><strong>Alternative matches:</strong></p>\n'
             for alt_person, alt_conf in result.alternatives:
-                conf_class = "confidence-high" if alt_conf >= 0.7 else "confidence-medium" if alt_conf >= 0.5 else "confidence-low"
+                conf_class = (
+                    "confidence-high"
+                    if alt_conf >= 0.7
+                    else "confidence-medium"
+                    if alt_conf >= 0.5
+                    else "confidence-low"
+                )
                 html += f'                <p style="font-size: 0.75em; margin: 2px 0;">• {alt_person}: <span class="{conf_class}" style="padding: 2px 6px; font-size: 0.9em;">{alt_conf:.1%}</span></p>\n'
-            html += '            </div>\n'
-        
+            html += "            </div>\n"
+
         html += """        </div>
     </div>
 </div>

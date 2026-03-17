@@ -279,7 +279,9 @@ class EmbeddingStore:
                 self._save()
 
             remaining_persons = len(self.embeddings)
-            remaining_embeddings = sum(len(entries) for entries in self.embeddings.values())
+            remaining_embeddings = sum(
+                len(entries) for entries in self.embeddings.values()
+            )
 
         return {
             "removed_embeddings": removed_embeddings,

@@ -512,7 +512,9 @@ class TestDebugLoggerInit:
         non_existent = tmp_path / "nonexistent" / "debug"
         DebugLogger(debug_path=str(non_existent), enabled=False)
 
-        assert not non_existent.exists(), "Directories must not be created when disabled"
+        assert not non_existent.exists(), (
+            "Directories must not be created when disabled"
+        )
 
     def test_enabled_creates_dirs(self, tmp_path):
         """DebugLogger with enabled=True must create debug directories."""
