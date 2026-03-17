@@ -19,6 +19,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_YAML = REPO_ROOT / "frigate_identity_service" / "config.yaml"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+ADDON_CHANGELOG = REPO_ROOT / "frigate_identity_service" / "CHANGELOG.md"
+
+UNRELEASED_TEMPLATE = """## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+"""
 
 
 def run(cmd: list[str], check: bool = True, capture: bool = False) -> str:
@@ -108,34 +120,40 @@ def categorize_commits(commits: list[str]) -> dict[str, list[str]]:
     }
 
     # Conventional commit prefixes
-    feat_pattern = r"^feat(?:\([^)]*\))?:\s*(.+)$"
-    fix_pattern = r"^fix(?:\([^)]*\))?:\s*(.+)$"
-    refactor_pattern = r"^(?:refactor|perf|change|update|style)(?:\([^)]*\))?:\s*(.+)$"
-    remove_pattern = r"^(?:remove|deprecate|revert)(?:\([^)]*\))?:\s*(.+)$"
+    feat_pattern = r"^feat(?:\(([^)]*)\))?:\s*(.+)$"
+    fix_pattern = r"^fix(?:\(([^)]*)\))?:\s*(.+)$"
+    refactor_pattern = r"^(?:refactor|perf|change|update|style)(?:\(([^)]*)\))?:\s*(.+)$"
+    remove_pattern = r"^(?:remove|deprecate|revert)(?:\(([^)]*)\))?:\s*(.+)$"
+
+    def _fmt(scope: str | None, message: str) -> str:
+        message = message.strip()
+        if scope:
+            return f"- {scope}: {message}"
+        return f"- {message}"
 
     for commit in commits:
         # Try feat pattern
         match = re.match(feat_pattern, commit)
         if match:
-            categories["Added"].append(f"- {match.group(1)}")
+            categories["Added"].append(_fmt(match.group(1), match.group(2)))
             continue
 
         # Try fix pattern
         match = re.match(fix_pattern, commit)
         if match:
-            categories["Fixed"].append(f"- {match.group(1)}")
+            categories["Fixed"].append(_fmt(match.group(1), match.group(2)))
             continue
 
         # Try remove pattern
         match = re.match(remove_pattern, commit)
         if match:
-            categories["Removed"].append(f"- {match.group(1)}")
+            categories["Removed"].append(_fmt(match.group(1), match.group(2)))
             continue
 
         # Try refactor pattern
         match = re.match(refactor_pattern, commit)
         if match:
-            categories["Changed"].append(f"- {match.group(1)}")
+            categories["Changed"].append(_fmt(match.group(1), match.group(2)))
             continue
 
         # Default to Changed if no pattern matches
@@ -177,14 +195,45 @@ def update_changelog(new_version: str) -> None:
                     categories[category]
                 )
 
-    # Replace [Unreleased] with new version and add fresh [Unreleased] section
-    new_header = f"## [Unreleased]\n\n{new_version_section}"
-    updated = text.replace("## [Unreleased]", new_header, 1)
+    # Replace the whole [Unreleased] block with a fresh template and the new version section.
+    unreleased_block_pattern = re.compile(
+        r"^## \[Unreleased\]\n(?:.*?\n)?(?=^## \[|\Z)",
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    new_header = f"{UNRELEASED_TEMPLATE}\n\n{new_version_section}\n"
+    updated = unreleased_block_pattern.sub(new_header, text, count=1)
 
     CHANGELOG.write_text(updated, encoding="utf-8")
     print(f"  Updated CHANGELOG.md with [{new_version}] - {today}")
     if commits:
         print(f"  Added {len(commits)} commit(s) from git history")
+
+    update_addon_changelog(new_version, categories)
+
+
+def update_addon_changelog(new_version: str, categories: dict[str, list[str]]) -> None:
+    """Update HA add-on changelog in format expected by the add-on store."""
+    lines = [f"## {new_version}"]
+
+    for category in ["Added", "Fixed", "Changed", "Removed"]:
+        if categories[category]:
+            lines.append(f"\n### {category}")
+            lines.extend(categories[category])
+
+    if not any(categories.values()):
+        lines.append("\n- Maintenance release")
+
+    new_section = "\n".join(lines).strip() + "\n"
+
+    existing = ADDON_CHANGELOG.read_text(encoding="utf-8") if ADDON_CHANGELOG.exists() else ""
+    version_header = f"## {new_version}"
+    if version_header in existing:
+        print(f"  Skipped {ADDON_CHANGELOG.relative_to(REPO_ROOT)} (already has {version_header})")
+        return
+
+    updated = f"{new_section}\n{existing.strip()}\n" if existing.strip() else new_section
+    ADDON_CHANGELOG.write_text(updated, encoding="utf-8")
+    print(f"  Updated {ADDON_CHANGELOG.relative_to(REPO_ROOT)} -> {version_header}")
 
 
 def check_clean_working_tree() -> None:
@@ -271,7 +320,7 @@ def main() -> None:
 
     # Git operations
     print("\nGit operations:")
-    run(["git", "add", str(CONFIG_YAML), str(CHANGELOG)])
+    run(["git", "add", str(CONFIG_YAML), str(CHANGELOG), str(ADDON_CHANGELOG)])
     run(["git", "commit", "-m", f"Release v{new_version}"])
     print(f"  Committed: Release v{new_version}")
 
