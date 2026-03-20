@@ -26,6 +26,10 @@ options:
   recency_decay_mode: "linear"
   recency_weight_floor: 0.3
   use_confidence_weighting: false
+  snapshot_fetch_mode: "clean_if_available"
+  snapshot_local_crop: true
+  snapshot_crop_padding_x: 0.05
+  snapshot_crop_padding_y: 0.20
   snapshot_correlation_window: 2.0
   max_tracked_persons_per_camera: 3
   debug_logging_enabled: false
@@ -49,6 +53,10 @@ schema:
   recency_decay_mode: str
   recency_weight_floor: float(0.0,0.9)
   use_confidence_weighting: bool
+  snapshot_fetch_mode: str
+  snapshot_local_crop: bool
+  snapshot_crop_padding_x: float(0.0,1.0)
+  snapshot_crop_padding_y: float(0.0,1.0)
   snapshot_correlation_window: float(0.1,10.0)
   max_tracked_persons_per_camera: int(1,20)
   debug_logging_enabled: bool

@@ -16,6 +16,12 @@ from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
 from mqtt_utils import get_mqtt_client
 from debug_logger import DebugLogger
+from snapshot_crop import (
+    build_local_crop_rect,
+    crop_snapshot_bytes,
+    crop_snapshot_pil,
+    pil_to_jpeg_bytes,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -178,6 +184,11 @@ FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.75"))
+SNAPSHOT_FETCH_MODE = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
+SNAPSHOT_LOCAL_CROP = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower() == "true"
+# Asymmetric padding: more vertical context (head/feet) than horizontal.
+SNAPSHOT_CROP_PADDING_X = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
+SNAPSHOT_CROP_PADDING_Y = float(os.getenv("SNAPSHOT_CROP_PADDING_Y", "0.20"))
 
 
 def validate_config():
@@ -209,6 +220,40 @@ def validate_config():
     if not (0.1 <= snapshot_window <= 10.0):
         errors.append(
             f"SNAPSHOT_CORRELATION_WINDOW must be between 0.1 and 10.0, got {snapshot_window}"
+        )
+
+    # Validate snapshot fetch mode
+    snapshot_fetch_mode = os.getenv(
+        "SNAPSHOT_FETCH_MODE", "clean_if_available"
+    ).lower()
+    valid_snapshot_fetch_modes = {"thumbnail", "snapshot", "clean_if_available"}
+    if snapshot_fetch_mode not in valid_snapshot_fetch_modes:
+        errors.append(
+            "SNAPSHOT_FETCH_MODE must be one of "
+            f"{sorted(valid_snapshot_fetch_modes)}, got '{snapshot_fetch_mode}'"
+        )
+
+    # Validate snapshot crop padding (legacy symmetric and per-axis)
+    # Validate snapshot crop padding (per-axis)
+    snapshot_crop_padding_x = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
+    if not (0.0 <= snapshot_crop_padding_x <= 1.0):
+        errors.append(
+            "SNAPSHOT_CROP_PADDING_X must be between 0.0 and 1.0, "
+            f"got {snapshot_crop_padding_x}"
+        )
+    snapshot_crop_padding_y = float(os.getenv("SNAPSHOT_CROP_PADDING_Y", "0.20"))
+    if not (0.0 <= snapshot_crop_padding_y <= 1.0):
+        errors.append(
+            "SNAPSHOT_CROP_PADDING_Y must be between 0.0 and 1.0, "
+            f"got {snapshot_crop_padding_y}"
+        )
+
+    # Validate snapshot local crop toggle
+    snapshot_local_crop = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower()
+    if snapshot_local_crop not in {"true", "false"}:
+        errors.append(
+            "SNAPSHOT_LOCAL_CROP must be 'true' or 'false', "
+            f"got '{snapshot_local_crop}'"
         )
 
     # Validate max tracked persons
@@ -312,6 +357,13 @@ def validate_config():
         REID_MODEL,
         REID_DEVICE,
         REID_SIMILARITY_THRESHOLD,
+    )
+    logger.info(
+        "  Snapshots: mode=%s, local_crop=%s, crop_padding_x=%.2f, crop_padding_y=%.2f",
+        snapshot_fetch_mode,
+        snapshot_local_crop,
+        snapshot_crop_padding_x,
+        snapshot_crop_padding_y,
     )
 
     # Determine default paths for display
@@ -469,8 +521,13 @@ debug_logger = DebugLogger(
 # Track recent person detections per camera for snapshot correlation
 camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_CAMERA))
 
+# Track recognized person identities until the tracked object finishes so we can
+# learn embeddings from Frigate's final best-frame snapshot.
+recognized_person_events = {}
+
 # Cache snapshots to avoid redundant API calls
-snapshot_cache = {}  # event_id -> (base64_image, timestamp)
+snapshot_cache = {}  # cache_key -> (base64_image, timestamp)
+event_details_cache = {}  # event_id -> (event_payload, timestamp)
 CACHE_TTL = 60  # seconds
 
 
@@ -557,53 +614,348 @@ def handle_debug_control(client, msg):
         logger.error("[DEBUG] Error handling debug control: %s", e)
 
 
-def fetch_snapshot_from_api(event_id, crop=True, quality=85, height=400):
+def _normalize_relative_rect(rect):
+    """Normalize a relative [x, y, width, height] rectangle from Frigate metadata."""
+    if not isinstance(rect, (list, tuple)) or len(rect) != 4:
+        return None
+
+    try:
+        x_pos, y_pos, width, height = (float(value) for value in rect)
+    except (TypeError, ValueError):
+        return None
+
+    if min(x_pos, y_pos, width, height) < 0:
+        return None
+
+    if width <= 0 or height <= 0:
+        return None
+
+    # Frigate event payloads expose relative coordinates. Ignore anything that
+    # looks like absolute pixels because we cannot map those safely here.
+    if max(x_pos, y_pos, width, height) > 1.5:
+        return None
+
+    return (x_pos, y_pos, width, height)
+
+
+def _extract_snapshot_crop_geometry(event_payload):
+    """Extract box/region geometry from MQTT or REST event payloads."""
+    if not isinstance(event_payload, dict):
+        return None
+
+    payload_candidates = []
+    data_payload = event_payload.get("data")
+    if isinstance(data_payload, dict):
+        payload_candidates.append(data_payload)
+    payload_candidates.append(event_payload)
+
+    for payload in payload_candidates:
+        box = _normalize_relative_rect(payload.get("box"))
+        region = _normalize_relative_rect(payload.get("region"))
+        if box or region:
+            return {"box": box, "region": region}
+
+    return None
+
+
+def _build_local_crop_rect(crop_geometry):
+    """Delegate to :func:`snapshot_crop.build_local_crop_rect` with service-level padding."""
+    return build_local_crop_rect(
+        crop_geometry,
+        padding_x=SNAPSHOT_CROP_PADDING_X,
+        padding_y=SNAPSHOT_CROP_PADDING_Y,
+    )
+
+
+def _crop_snapshot_bytes(image_bytes, crop_geometry, quality=85):
+    """Delegate to :func:`snapshot_crop.crop_snapshot_bytes` with service-level padding."""
+    return crop_snapshot_bytes(
+        image_bytes,
+        crop_geometry,
+        quality=quality,
+        padding_x=SNAPSHOT_CROP_PADDING_X,
+        padding_y=SNAPSHOT_CROP_PADDING_Y,
+    )
+
+
+def _crop_snapshot_pil(image_bytes, crop_geometry):
+    """Delegate to :func:`snapshot_crop.crop_snapshot_pil` with service-level padding."""
+    return crop_snapshot_pil(
+        image_bytes,
+        crop_geometry,
+        padding_x=SNAPSHOT_CROP_PADDING_X,
+        padding_y=SNAPSHOT_CROP_PADDING_Y,
+    )
+
+
+def _fetch_event_details(event_id):
+    """Fetch full event metadata from Frigate and cache it briefly."""
+    now = time.time()
+
+    if event_id in event_details_cache:
+        cached_payload, cached_time = event_details_cache[event_id]
+        if now - cached_time < CACHE_TTL:
+            return cached_payload
+
+    try:
+        url = f"{FRIGATE_HOST}/api/events/{event_id}"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+        event_details_cache[event_id] = (payload, now)
+        return payload
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.warning("[API] Failed to fetch event details for %s: %s", event_id, e)
+        return None
+
+
+def _build_snapshot_cache_key(event_id, crop, quality, height, crop_geometry):
+    """Build a cache key that distinguishes snapshot strategy and crop geometry."""
+    crop_key = None
+    if crop_geometry:
+        crop_key = tuple(crop_geometry.get("box") or crop_geometry.get("region") or ())
+
+    return (
+        event_id,
+        SNAPSHOT_FETCH_MODE,
+        bool(crop),
+        int(quality),
+        int(height or 0),
+        crop_key,
+    )
+
+
+def _build_snapshot_candidates(event_id, crop, quality, height):
+    """Build preferred Frigate snapshot endpoints in fallback order."""
+    candidates = []
+
+    if SNAPSHOT_FETCH_MODE == "clean_if_available":
+        candidates.append(
+            {
+                "kind": "clean",
+                "url": f"{FRIGATE_HOST}/api/events/{event_id}/snapshot-clean.webp",
+                "params": None,
+            }
+        )
+
+    if SNAPSHOT_FETCH_MODE in {"snapshot", "clean_if_available"}:
+        snapshot_params = {
+            "bbox": 0,
+            "timestamp": 0,
+            "quality": quality,
+        }
+        if height:
+            snapshot_params["height"] = height
+        snapshot_params["crop"] = 1 if crop else 0
+        candidates.append(
+            {
+                "kind": "snapshot",
+                "url": f"{FRIGATE_HOST}/api/events/{event_id}/snapshot.jpg",
+                "params": snapshot_params,
+            }
+        )
+
+    candidates.append(
+        {
+            "kind": "thumbnail",
+            "url": f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg",
+            "params": None,
+        }
+    )
+
+    return candidates
+
+
+def build_identity_snapshot_urls(event_id):
+    """Build stable Frigate URLs for downstream consumers."""
+    return {
+        "snapshot_url": (
+            f"{FRIGATE_HOST}/api/events/{event_id}/snapshot.jpg?crop=1&bbox=0&timestamp=0"
+        ),
+        "clean_snapshot_url": (
+            f"{FRIGATE_HOST}/api/events/{event_id}/snapshot-clean.webp"
+        ),
+    }
+
+
+def fetch_snapshot_from_api(
+    event_id,
+    crop=True,
+    quality=85,
+    height=400,
+    event_payload=None,
+    _pil_out=None,
+):
     """
     Fetch snapshot from Frigate API for a specific event.
     Uses caching to avoid redundant API calls.
 
-    Returns: base64-encoded JPEG string, or None if failed
+    Args:
+        event_id: Frigate event ID.
+        crop: Whether to request/apply a person crop.
+        quality: JPEG quality for encoding.
+        height: Optional height hint passed to Frigate's snapshot endpoint.
+        event_payload: MQTT event payload used to extract crop geometry.
+        _pil_out: Optional list.  When provided and the clean-crop path is
+            taken, the pre-JPEG PIL Image is appended so callers can pass it
+            directly to :meth:`ReIDModel.extract_embedding_from_pil`, avoiding
+            the lossy JPEG encode/decode round-trip.  On cache hits this list
+            remains empty and callers should fall back to the base64 path.
+
+    Returns:
+        base64-encoded JPEG string, or None if failed.
     """
     now = time.time()
+    crop_geometry = _extract_snapshot_crop_geometry(event_payload)
+
+    if crop and SNAPSHOT_FETCH_MODE == "clean_if_available" and SNAPSHOT_LOCAL_CROP:
+        if crop_geometry is None:
+            crop_geometry = _extract_snapshot_crop_geometry(_fetch_event_details(event_id))
+
+    cache_key = _build_snapshot_cache_key(event_id, crop, quality, height, crop_geometry)
 
     # Check cache
-    if event_id in snapshot_cache:
-        cached_img, cached_time = snapshot_cache[event_id]
+    if cache_key in snapshot_cache:
+        cached_img, cached_time = snapshot_cache[cache_key]
         if now - cached_time < CACHE_TTL:
             return cached_img
 
-    try:
-        # Use thumbnail endpoint with crop parameter
-        url = f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg"
-        params = {"crop": "1" if crop else "0", "quality": quality, "h": height}
-
-        response = requests.get(url, params=params, timeout=5)
-
-        if response.status_code == 200:
-            # Convert to base64 for ReID model
-            image_base64 = base64.b64encode(response.content).decode("utf-8")
-
-            # Cache the result
-            snapshot_cache[event_id] = (image_base64, now)
-
-            return image_base64
-        else:
-            logger.warning(
-                "[API] Failed to fetch snapshot for %s: HTTP %s",
-                event_id,
-                response.status_code,
+    for candidate in _build_snapshot_candidates(event_id, crop, quality, height):
+        try:
+            response = requests.get(
+                candidate["url"], params=candidate["params"], timeout=5
             )
-            return None
 
-    except requests.exceptions.RequestException as e:
-        logger.error("[API] Error fetching snapshot for %s: %s", event_id, e)
-        return None
+            if response.status_code != 200:
+                logger.debug(
+                    "[API] Snapshot candidate %s failed for %s: HTTP %s",
+                    candidate["kind"],
+                    event_id,
+                    response.status_code,
+                )
+                continue
+
+            image_bytes = response.content
+            if (
+                crop
+                and candidate["kind"] == "clean"
+                and SNAPSHOT_LOCAL_CROP
+                and crop_geometry is not None
+            ):
+                # Crop to PIL first — lossless intermediate for the ReID path.
+                pil_crop = _crop_snapshot_pil(image_bytes, crop_geometry)
+                if pil_crop is not None:
+                    if _pil_out is not None:
+                        _pil_out.append(pil_crop)
+                    # JPEG-encode for cache and debug logger (only one encode).
+                    image_bytes = pil_to_jpeg_bytes(pil_crop, quality=quality)
+                else:
+                    # Degenerate bbox — fall back to bytes-only crop.
+                    cropped_bytes = _crop_snapshot_bytes(
+                        image_bytes, crop_geometry, quality=quality
+                    )
+                    if cropped_bytes:
+                        image_bytes = cropped_bytes
+
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+            snapshot_cache[cache_key] = (image_base64, now)
+            return image_base64
+        except requests.exceptions.RequestException as e:
+            logger.debug(
+                "[API] Snapshot candidate %s errored for %s: %s",
+                candidate["kind"],
+                event_id,
+                e,
+            )
+
+    logger.warning("[API] Failed to fetch snapshot for %s using all candidates", event_id)
+    return None
+
+
+def _cache_recognized_person_event(
+    event_id,
+    person_id,
+    camera,
+    confidence,
+    timestamp,
+    zones,
+):
+    """Cache recognized identity metadata until the tracked event completes."""
+    if not event_id or not person_id:
+        return
+
+    existing = recognized_person_events.get(event_id, {})
+    existing_confidence = float(existing.get("confidence", 0.0) or 0.0)
+    current_confidence = float(confidence or 0.0)
+
+    recognized_person_events[event_id] = {
+        "person_id": person_id,
+        "camera": camera or existing.get("camera"),
+        "confidence": max(existing_confidence, current_confidence),
+        "timestamp": timestamp
+        if timestamp is not None
+        else existing.get("timestamp", time.time()),
+        "zones": list(zones or existing.get("zones", [])),
+    }
+
+
+def _store_completed_face_embedding(
+    event_id,
+    person_id,
+    camera,
+    confidence,
+    zones,
+    timestamp,
+    event_payload,
+):
+    """Store a facial-recognition embedding from the completed event snapshot."""
+    if not REID_AVAILABLE or reid_model is None:
+        return
+
+    pil_out = []
+    snapshot_base64 = fetch_snapshot_from_api(
+        event_id,
+        crop=True,
+        event_payload=event_payload,
+        _pil_out=pil_out,
+    )
+
+    if not snapshot_base64:
+        logger.warning(
+            "[EMBEDDING] Could not fetch completed snapshot for recognized event %s",
+            event_id,
+        )
+        return
+
+    try:
+        if pil_out:
+            embedding = reid_model.extract_embedding_from_pil(pil_out[0])
+        else:
+            embedding = reid_model.extract_embedding(snapshot_base64)
+
+        embedding_store.store_embedding(person_id, embedding, camera, confidence)
+        logger.info("[EMBEDDING] Stored final facial embedding for %s", person_id)
+
+        debug_logger.log_facial_recognition(
+            event_id=event_id,
+            snapshot_base64=snapshot_base64,
+            person_id=person_id,
+            camera=camera,
+            confidence=confidence,
+            zones=zones,
+            timestamp=timestamp,
+        )
+    except Exception as e:
+        logger.error(
+            "[EMBEDDING] Error storing final embedding for %s: %s", person_id, e
+        )
 
 
 def publish_identity_event(
     client, person_id, camera, confidence, source, zones, event_id, timestamp
 ):
     """Publish identity event to Home Assistant"""
+    snapshot_urls = build_identity_snapshot_urls(event_id)
     identity_event = {
         "person_id": person_id,
         "camera": camera,
@@ -614,7 +966,8 @@ def publish_identity_event(
         "timestamp": int(timestamp * 1000)
         if isinstance(timestamp, float)
         else timestamp,
-        "snapshot_url": f"{FRIGATE_HOST}/api/events/{event_id}/thumbnail.jpg?crop=1",
+        "snapshot_url": snapshot_urls["snapshot_url"],
+        "clean_snapshot_url": snapshot_urls["clean_snapshot_url"],
     }
 
     # Publish to person-specific topic
@@ -677,8 +1030,29 @@ def handle_frigate_event(client, msg):
         sub_label,
     )
 
-    # Skip end events — person has left the frame
+    if sub_label:
+        _cache_recognized_person_event(
+            event_id,
+            sub_label,
+            camera,
+            confidence,
+            timestamp,
+            current_zones,
+        )
+
+    # Learn face embeddings only after Frigate has finalized the best frame.
     if event_type == "end":
+        recognized_event = recognized_person_events.pop(event_id, None)
+        if recognized_event:
+            _store_completed_face_embedding(
+                event_id,
+                recognized_event["person_id"],
+                recognized_event.get("camera") or camera,
+                recognized_event.get("confidence", confidence),
+                recognized_event.get("zones", current_zones),
+                recognized_event.get("timestamp", timestamp),
+                after,
+            )
         return
 
     # Add to camera tracking queue for snapshot correlation
@@ -697,32 +1071,6 @@ def handle_frigate_event(client, msg):
         # Add to correlation queue
         camera_person_queue[camera].append(detection_record)
 
-        # ACCURATE PATH: Fetch via API for embedding storage
-        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
-
-        if snapshot_base64 and REID_AVAILABLE:
-            try:
-                embedding = reid_model.extract_embedding(snapshot_base64)
-                embedding_store.store_embedding(
-                    person_id, embedding, camera, confidence
-                )
-                logger.info("[EMBEDDING] Stored accurate embedding for %s", person_id)
-
-                # Log to debug logger for analysis
-                debug_logger.log_facial_recognition(
-                    event_id=event_id,
-                    snapshot_base64=snapshot_base64,
-                    person_id=person_id,
-                    camera=camera,
-                    confidence=confidence,
-                    zones=current_zones,
-                    timestamp=timestamp,
-                )
-            except Exception as e:
-                logger.error(
-                    "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
-                )
-
         # Publish identity event (HA doesn't wait for embedding storage)
         publish_identity_event(
             client,
@@ -737,11 +1085,17 @@ def handle_frigate_event(client, msg):
 
     # SCENARIO B: Person detected but no face visible - try ReID
     else:
-        if not REID_AVAILABLE:
+        if not REID_AVAILABLE or reid_model is None:
             return
 
         # Try ReID matching via API (accurate)
-        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
+        pil_out_b = []
+        snapshot_base64 = fetch_snapshot_from_api(
+            event_id,
+            crop=True,
+            event_payload=after,
+            _pil_out=pil_out_b,
+        )
 
         if not snapshot_base64:
             logger.warning("[REID] Could not fetch snapshot for event %s", event_id)
@@ -749,7 +1103,10 @@ def handle_frigate_event(client, msg):
 
         try:
             # Extract embedding and match to stored persons
-            query_embedding = reid_model.extract_embedding(snapshot_base64)
+            if pil_out_b:
+                query_embedding = reid_model.extract_embedding_from_pil(pil_out_b[0])
+            else:
+                query_embedding = reid_model.extract_embedding(snapshot_base64)
             stored_embeddings = embedding_store.get_all_embeddings()
             person_id, similarity_score = embedding_matcher.find_best_match(
                 query_embedding, stored_embeddings, threshold=REID_SIMILARITY_THRESHOLD
@@ -854,20 +1211,14 @@ def handle_tracked_object_update(client, msg):
             "person_id": person_id,
         }
         camera_person_queue[camera].append(detection_record)
-
-        # Fetch snapshot and store embedding for ReID learning
-        snapshot_base64 = fetch_snapshot_from_api(event_id, crop=True)
-        if snapshot_base64 and REID_AVAILABLE:
-            try:
-                embedding = reid_model.extract_embedding(snapshot_base64)
-                embedding_store.store_embedding(person_id, embedding, camera, score)
-                logger.info(
-                    "[EMBEDDING] Stored embedding from face update for %s", person_id
-                )
-            except Exception as e:
-                logger.error(
-                    "[EMBEDDING] Error storing embedding for %s: %s", person_id, e
-                )
+        _cache_recognized_person_event(
+            event_id,
+            person_id,
+            camera,
+            score,
+            timestamp,
+            [],
+        )
 
         # Publish identity event
         publish_identity_event(

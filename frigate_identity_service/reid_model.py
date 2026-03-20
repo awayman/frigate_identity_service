@@ -202,6 +202,45 @@ class ReIDModel:
             _LOGGER.error(f"Error extracting embedding from image: {e}")
             raise
 
+    def extract_embedding_from_pil(self, image: Image.Image) -> np.ndarray:
+        """Extract re-identification embedding from an already-decoded PIL Image.
+
+        Skips the base64 decode and JPEG decode steps of
+        :meth:`extract_embedding`, eliminating the DCT block artefacts
+        introduced by a JPEG encode/decode round-trip on the ReID path.
+        Use this when the cropped PIL Image is available directly (e.g. from
+        :func:`snapshot_crop.crop_snapshot_pil`).
+
+        Args:
+            image: PIL Image (any mode; will be converted to RGB).
+
+        Returns:
+            Feature vector as numpy array (shape: (embedding_dim,))
+        """
+        try:
+            image = image.convert("RGB")
+
+            if self._use_torchreid:
+                return self._extract_torchreid(image)
+
+            # ResNet50 fallback path
+            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+            with torch.no_grad():
+                embedding = self.model(image_tensor)
+
+                if len(embedding.shape) > 2:
+                    embedding = embedding.view(embedding.size(0), -1)
+
+                embedding = embedding.cpu().numpy()[0]
+                embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
+
+            return embedding
+
+        except Exception as e:
+            _LOGGER.error(f"Error extracting embedding from PIL image: {e}")
+            raise
+
     def extract_embedding_from_file(self, image_path: str) -> np.ndarray:
         """Extract re-identification embedding from an image file.
 

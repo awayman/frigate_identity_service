@@ -58,7 +58,10 @@ class MatchReport:
         if not self.frigate_host:
             return None
         safe_event_id = quote(event_id, safe="")
-        return f"{self.frigate_host}/api/events/{safe_event_id}/snapshot.jpg?crop=1&quality=95"
+        return (
+            f"{self.frigate_host}/api/events/{safe_event_id}/snapshot.jpg"
+            "?crop=1&bbox=0&timestamp=0&quality=95"
+        )
 
     def add_match(
         self,

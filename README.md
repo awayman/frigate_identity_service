@@ -28,7 +28,7 @@ Lightweight ReID service that provides person identification continuity for Frig
 
 - **Two Snapshot Paths (Speed vs Accuracy):**
   - **Fast display path:** MQTT snapshot is temporally correlated to recent per-camera detections, then published to `identity/snapshots/{person_id}`
-  - **Accurate learning path:** API snapshot is used for embedding extraction and persistence in `EmbeddingStore`
+  - **Accurate learning path:** The service prefers Frigate clean snapshots when available, crops them locally from event box metadata for a tighter person crop, and falls back to event snapshots or thumbnails when needed
   - Correlation metadata is published to `identity/snapshots/{person_id}/metadata`
 
 - **Persistence and Matching:**
@@ -79,6 +79,10 @@ fully supported.
 | `EMBEDDING_MAX_AGE_HOURS` | `48` | Max embedding age before removal when `EMBEDDING_RETENTION_MODE=age_prune` |
 | `EMBEDDING_PRUNE_INTERVAL_MINUTES` | `30` | How often expired embeddings are pruned in `age_prune` mode |
 | `EMBEDDING_FULL_CLEAR_TIME` | `00:00` | Daily clear time (`HH:MM` 24h) when `EMBEDDING_RETENTION_MODE=full_clear_daily` |
+| `SNAPSHOT_FETCH_MODE` | `clean_if_available` | Snapshot preference for ReID input: `clean_if_available`, `snapshot`, or `thumbnail` |
+| `SNAPSHOT_LOCAL_CROP` | `true` | When using clean snapshots, crop locally from Frigate event box metadata for tighter person crops |
+| `SNAPSHOT_CROP_PADDING_X` | `0.05` | Horizontal padding (fraction of box width) added around the detected person box |
+| `SNAPSHOT_CROP_PADDING_Y` | `0.20` | Vertical padding (fraction of box height) added around the detected person box |
 | `SNAPSHOT_CORRELATION_WINDOW` | `2.0` | Seconds to correlate MQTT snapshots to persons |
 | `MAX_TRACKED_PERSONS_PER_CAMERA` | `3` | Max persons tracked per camera for correlation |
 | `DEBUG_LOGGING_ENABLED` | `false` | Enable debug logging for misidentification analysis |
@@ -253,6 +257,13 @@ Embedding retention defaults to age-based pruning (no scheduled full reset). To 
 ```bash
 EMBEDDING_RETENTION_MODE=full_clear_daily
 EMBEDDING_FULL_CLEAR_TIME=00:00
+```
+
+Snapshot defaults now favor cleaner ReID inputs. To force the previous thumbnail-based behavior, set:
+
+```bash
+SNAPSHOT_FETCH_MODE=thumbnail
+SNAPSHOT_LOCAL_CROP=false
 ```
 
 ## Home Assistant Add-on

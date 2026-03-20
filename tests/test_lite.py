@@ -9,7 +9,9 @@ import pytest
 import tempfile
 import os
 import sys
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -550,6 +552,263 @@ class TestDebugLoggerInit:
         assert dl.enabled is True
         assert (debug_path / "snapshots").is_dir()
         assert (debug_path / "logs").is_dir()
+
+
+class TestIdentityLifecycleHandlers:
+    """Tests for event lifecycle-specific identity handling."""
+
+    def _load_handler_functions(self):
+        """Compile selected identity_service handlers without importing the module."""
+        import ast
+        import time
+        import traceback
+
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frigate_identity_service",
+            "identity_service.py",
+        )
+        with open(src_path) as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+        wanted = {
+            "_cache_recognized_person_event",
+            "_store_completed_face_embedding",
+            "handle_frigate_event",
+            "handle_tracked_object_update",
+        }
+        func_defs: list[ast.stmt] = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name in wanted
+        ]
+        module = ast.Module(body=func_defs, type_ignores=[])
+        code = compile(module, src_path, "exec")
+
+        ns = {
+            "json": json,
+            "time": time,
+            "traceback": traceback,
+            "logger": logging.getLogger("test_identity_lifecycle"),
+            "recognized_person_events": {},
+            "camera_person_queue": defaultdict(lambda: deque(maxlen=3)),
+            "REID_AVAILABLE": True,
+            "REID_SIMILARITY_THRESHOLD": 0.75,
+        }
+        exec(code, ns)
+        return ns
+
+    def test_active_face_recognition_publishes_without_learning(self):
+        """Live recognized events should publish immediately but defer embedding storage."""
+        ns = self._load_handler_functions()
+        fetch_calls = []
+        stored_embeddings = []
+        published = []
+
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
+            (args, kwargs)
+        )
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: stored_embeddings.append(args),
+            get_all_embeddings=lambda: {},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1],
+            extract_embedding_from_pil=lambda image: [0.1],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: None,
+            log_reid_match=lambda **kwargs: None,
+            log_reid_no_match=lambda **kwargs: None,
+        )
+        ns["embedding_matcher"] = SimpleNamespace(
+            find_best_match=lambda *args, **kwargs: (None, 0.0),
+            find_top_k_matches=lambda *args, **kwargs: [],
+        )
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+
+        payload = {
+            "type": "update",
+            "after": {
+                "id": "evt-1",
+                "camera": "front",
+                "label": "person",
+                "sub_label": ["Alice", 0.96],
+                "current_zones": ["porch"],
+                "top_score": 0.91,
+                "frame_time": 1234.5,
+            },
+        }
+        msg = SimpleNamespace(
+            topic="frigate/events",
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+
+        ns["handle_frigate_event"](SimpleNamespace(), msg)
+
+        assert fetch_calls == []
+        assert stored_embeddings == []
+        assert published and published[0][4] == "facial_recognition"
+        assert ns["recognized_person_events"]["evt-1"]["person_id"] == "Alice"
+        assert ns["camera_person_queue"]["front"][0]["person_id"] == "Alice"
+
+    def test_completed_event_stores_final_face_embedding(self):
+        """Completed person events should learn from the final event snapshot."""
+        ns = self._load_handler_functions()
+        fetch_calls = []
+        stored_embeddings = []
+        debug_logs = []
+        published = []
+
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
+            (args, kwargs)
+        ) or "snapshot-base64"
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: stored_embeddings.append(args),
+            get_all_embeddings=lambda: {},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1, 0.2],
+            extract_embedding_from_pil=lambda image: [0.3, 0.4],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: debug_logs.append(kwargs),
+            log_reid_match=lambda **kwargs: None,
+            log_reid_no_match=lambda **kwargs: None,
+        )
+        ns["embedding_matcher"] = SimpleNamespace(
+            find_best_match=lambda *args, **kwargs: (None, 0.0),
+            find_top_k_matches=lambda *args, **kwargs: [],
+        )
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+
+        ns["_cache_recognized_person_event"](
+            "evt-2", "Alice", "front", 0.97, 5678.9, ["porch"]
+        )
+        end_payload = {
+            "type": "end",
+            "after": {
+                "id": "evt-2",
+                "camera": "front",
+                "label": "person",
+                "sub_label": None,
+                "current_zones": ["porch"],
+                "top_score": 0.80,
+                "frame_time": 5680.0,
+            },
+        }
+        msg = SimpleNamespace(
+            topic="frigate/events",
+            payload=json.dumps(end_payload).encode("utf-8"),
+        )
+
+        ns["handle_frigate_event"](SimpleNamespace(), msg)
+
+        assert len(fetch_calls) == 1
+        assert stored_embeddings == [("Alice", [0.1, 0.2], "front", 0.97)]
+        assert debug_logs and debug_logs[0]["person_id"] == "Alice"
+        assert published == []
+        assert "evt-2" not in ns["recognized_person_events"]
+
+    def test_active_unknown_person_still_runs_reid(self):
+        """Unrecognized active events should still fetch snapshots for live ReID."""
+        ns = self._load_handler_functions()
+        fetch_calls = []
+        published = []
+        reid_logs = []
+
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
+            (args, kwargs)
+        ) or "snapshot-base64"
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: None,
+            get_all_embeddings=lambda: {"Bob": ([0.9], "driveway", 0.8)},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1],
+            extract_embedding_from_pil=lambda image: [0.1],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: None,
+            log_reid_match=lambda **kwargs: reid_logs.append(kwargs),
+            log_reid_no_match=lambda **kwargs: None,
+        )
+        ns["embedding_matcher"] = SimpleNamespace(
+            find_best_match=lambda *args, **kwargs: ("Bob", 0.88),
+            find_top_k_matches=lambda *args, **kwargs: [("Bob", 0.88)],
+        )
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+
+        payload = {
+            "type": "update",
+            "after": {
+                "id": "evt-3",
+                "camera": "driveway",
+                "label": "person",
+                "sub_label": None,
+                "current_zones": ["driveway"],
+                "top_score": 0.84,
+                "frame_time": 6789.0,
+            },
+        }
+        msg = SimpleNamespace(
+            topic="frigate/events",
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+
+        ns["handle_frigate_event"](SimpleNamespace(), msg)
+
+        assert len(fetch_calls) == 1
+        assert published and published[0][4] == "reid_model"
+        assert reid_logs and reid_logs[0]["chosen_person_id"] == "Bob"
+        assert ns["camera_person_queue"]["driveway"][0]["person_id"] == "Bob"
+
+    def test_face_updates_cache_identity_without_learning_immediately(self):
+        """Face updates should publish and cache identity but wait for end-event learning."""
+        ns = self._load_handler_functions()
+        fetch_calls = []
+        stored_embeddings = []
+        published = []
+
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
+            (args, kwargs)
+        )
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: stored_embeddings.append(args),
+            get_all_embeddings=lambda: {},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1],
+            extract_embedding_from_pil=lambda image: [0.1],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: None,
+            log_reid_match=lambda **kwargs: None,
+            log_reid_no_match=lambda **kwargs: None,
+        )
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+
+        payload = {
+            "type": "face",
+            "id": "evt-4",
+            "name": "Carol",
+            "score": 0.93,
+            "camera": "backyard",
+            "timestamp": 7890.1,
+        }
+        msg = SimpleNamespace(
+            topic="frigate/tracked_object_update",
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+
+        ns["handle_tracked_object_update"](SimpleNamespace(), msg)
+
+        assert fetch_calls == []
+        assert stored_embeddings == []
+        assert published and published[0][4] == "face_recognition_update"
+        assert ns["recognized_person_events"]["evt-4"]["person_id"] == "Carol"
+        assert ns["camera_person_queue"]["backyard"][0]["person_id"] == "Carol"
 
 
 if __name__ == "__main__":

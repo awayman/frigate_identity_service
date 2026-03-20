@@ -165,18 +165,27 @@ def fetch_event_by_id(
         return None
 
 
-def get_event_snapshot_url(frigate_url: str, event_id: str) -> str:
-    """Get the snapshot URL for a specific Frigate event.
+def get_event_snapshot_url(
+    frigate_url: str,
+    event_id: str,
+    snapshot_type: str = "snapshot",
+) -> str:
+    """Get the preferred snapshot URL for a specific Frigate event.
 
     Args:
         frigate_url: Base URL for Frigate
         event_id: Event ID from Frigate API
+        snapshot_type: One of 'snapshot', 'clean', or 'thumbnail'
 
     Returns:
         Full URL to the event snapshot
     """
     frigate_url = frigate_url.rstrip("/")
-    return f"{frigate_url}/api/events/{event_id}/thumbnail.jpg"
+    if snapshot_type == "clean":
+        return f"{frigate_url}/api/events/{event_id}/snapshot-clean.webp"
+    if snapshot_type == "thumbnail":
+        return f"{frigate_url}/api/events/{event_id}/thumbnail.jpg"
+    return f"{frigate_url}/api/events/{event_id}/snapshot.jpg"
 
 
 def fetch_snapshot_bytes(
@@ -201,11 +210,15 @@ def fetch_snapshot_bytes(
         Image bytes if successful, None if failed
     """
     try:
-        params = {
-            "crop": "1" if crop else "0",
-            "quality": quality,
-            "h": height,
-        }
+        params = None
+        if "/snapshot.jpg" in url:
+            params = {
+                "bbox": 0,
+                "timestamp": 0,
+                "crop": 1 if crop else 0,
+                "quality": quality,
+                "height": height,
+            }
         response = session.get(url, params=params, timeout=timeout)
         response.raise_for_status()
 

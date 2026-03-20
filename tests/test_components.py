@@ -200,5 +200,375 @@ class TestIntegration:
         assert score > 0.9
 
 
+class TestFrigateSnapshotHelpers:
+    """Tests for Frigate snapshot helper URL and query handling."""
+
+    def test_get_event_snapshot_url_defaults_to_snapshot(self):
+        """Snapshot helper should default to the event snapshot endpoint."""
+        from tests.utils.frigate_api import get_event_snapshot_url
+
+        assert (
+            get_event_snapshot_url("http://frigate:5000", "abc123")
+            == "http://frigate:5000/api/events/abc123/snapshot.jpg"
+        )
+
+    def test_get_event_snapshot_url_supports_clean_copy(self):
+        """Snapshot helper should expose the clean snapshot endpoint."""
+        from tests.utils.frigate_api import get_event_snapshot_url
+
+        assert (
+            get_event_snapshot_url("http://frigate:5000", "abc123", "clean")
+            == "http://frigate:5000/api/events/abc123/snapshot-clean.webp"
+        )
+
+    def test_fetch_snapshot_bytes_uses_snapshot_query_params(self):
+        """Snapshot endpoint requests should send Frigate-supported query params."""
+        from tests.utils.frigate_api import fetch_snapshot_bytes
+
+        class Response:
+            status_code = 200
+            content = b"snapshot-bytes"
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, url, params=None, timeout=None):
+                self.calls.append((url, params, timeout))
+                return Response()
+
+        session = Session()
+        result = fetch_snapshot_bytes(
+            session,
+            "http://frigate:5000/api/events/abc123/snapshot.jpg",
+            crop=True,
+            quality=90,
+            height=420,
+        )
+
+        assert result == b"snapshot-bytes"
+        assert session.calls == [
+            (
+                "http://frigate:5000/api/events/abc123/snapshot.jpg",
+                {
+                    "bbox": 0,
+                    "timestamp": 0,
+                    "crop": 1,
+                    "quality": 90,
+                    "height": 420,
+                },
+                10,
+            )
+        ]
+
+    def test_fetch_snapshot_bytes_skips_params_for_clean_snapshot(self):
+        """Clean snapshot requests should not send snapshot-only query params."""
+        from tests.utils.frigate_api import fetch_snapshot_bytes
+
+        class Response:
+            status_code = 200
+            content = b"clean-bytes"
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, url, params=None, timeout=None):
+                self.calls.append((url, params, timeout))
+                return Response()
+
+        session = Session()
+        result = fetch_snapshot_bytes(
+            session,
+            "http://frigate:5000/api/events/abc123/snapshot-clean.webp",
+        )
+
+        assert result == b"clean-bytes"
+        assert session.calls == [
+            (
+                "http://frigate:5000/api/events/abc123/snapshot-clean.webp",
+                None,
+                10,
+            )
+        ]
+
+
+class TestLocalCropHelpers:
+    """Unit tests for the local snapshot crop geometry helpers."""
+
+    def test_build_crop_rect_applies_asymmetric_padding(self):
+        """Vertical padding should be larger than horizontal padding."""
+        from snapshot_crop import build_local_crop_rect
+
+        # Tight centre box: x=0.4, y=0.4, w=0.2, h=0.2
+        geometry = {"box": (0.4, 0.4, 0.2, 0.2)}
+        rect = build_local_crop_rect(geometry, padding_x=0.05, padding_y=0.20)
+        assert rect is not None
+        left, top, right, bottom = rect
+
+        horizontal_expansion = (right - left) - 0.2
+        vertical_expansion = (bottom - top) - 0.2
+        assert vertical_expansion > horizontal_expansion
+
+    def test_build_crop_rect_targets_2_to_1_aspect_ratio(self):
+        """Output rect should have height:width ratio of 2:1."""
+        from snapshot_crop import build_local_crop_rect
+
+        # Square-ish person detection at centre
+        geometry = {"box": (0.3, 0.3, 0.4, 0.4)}
+        rect = build_local_crop_rect(geometry, padding_x=0.05, padding_y=0.20)
+        assert rect is not None
+        left, top, right, bottom = rect
+
+        w = right - left
+        h = bottom - top
+        ratio = h / w
+        assert abs(ratio - 2.0) < 0.05, f"Expected ~2.0 ratio, got {ratio:.3f}"
+
+    def test_build_crop_rect_expands_wide_box_vertically(self):
+        """A very wide detection should have its height expanded to reach 2:1."""
+        from snapshot_crop import build_local_crop_rect
+
+        # Wide, shallow box (e.g. a person far away, or arms out)
+        geometry = {"box": (0.1, 0.4, 0.8, 0.1)}
+        rect = build_local_crop_rect(geometry, padding_x=0.05, padding_y=0.20)
+        assert rect is not None
+        left, top, right, bottom = rect
+        h = bottom - top
+        w = right - left
+        assert h / w >= 1.9, f"Expected ratio >= 1.9, got {h/w:.3f}"
+
+    def test_build_crop_rect_returns_none_for_missing_geometry(self):
+        """None or empty geometry should return None."""
+        from snapshot_crop import build_local_crop_rect
+
+        assert build_local_crop_rect(None) is None
+        assert build_local_crop_rect({}) is None
+        assert build_local_crop_rect({"box": None, "region": None}) is None
+
+    def test_build_crop_rect_allows_out_of_bounds_coords(self):
+        """Rect touching frame edge may have coords outside [0,1] — letterbox handles it."""
+        from snapshot_crop import build_local_crop_rect
+
+        # Person at top-left corner
+        geometry = {"box": (0.0, 0.0, 0.1, 0.2)}
+        rect = build_local_crop_rect(geometry, padding_x=0.05, padding_y=0.20)
+        assert rect is not None
+        left, top, right, bottom = rect
+        assert right > left and bottom > top
+
+    def test_letterbox_to_ratio_pads_wide_image(self):
+        """A wider-than-2:1 image should be padded top/bottom."""
+        from snapshot_crop import letterbox_to_ratio
+
+        img = Image.new("RGB", (200, 100))  # 0.5:1 ratio (too wide)
+        result = letterbox_to_ratio(img, target_ratio=2.0)
+        w, h = result.size
+        assert h / w == pytest.approx(2.0, abs=0.02)
+        assert w == 200  # width unchanged
+
+    def test_letterbox_to_ratio_pads_tall_image(self):
+        """A taller-than-2:1 image should be padded left/right."""
+        from snapshot_crop import letterbox_to_ratio
+
+        img = Image.new("RGB", (100, 400))  # 4:1 ratio (too tall)
+        result = letterbox_to_ratio(img, target_ratio=2.0)
+        w, h = result.size
+        assert h / w == pytest.approx(2.0, abs=0.02)
+        assert h == 400  # height unchanged
+
+    def test_letterbox_fill_colour_is_imagenet_mean(self):
+        """Padded pixels should use the ImageNet mean colour (124, 116, 104)."""
+        from snapshot_crop import letterbox_to_ratio
+
+        img = Image.new("RGB", (200, 50), color=(255, 0, 0))  # too wide
+        result = letterbox_to_ratio(img, target_ratio=2.0)
+        # Top-left pixel is in the padding region
+        pad_pixel = result.getpixel((0, 0))
+        assert pad_pixel == (124, 116, 104)
+
+    def test_crop_snapshot_bytes_returns_jpeg_for_valid_input(self):
+        """crop_snapshot_bytes should return JPEG bytes for a valid clean frame."""
+        from snapshot_crop import crop_snapshot_bytes
+
+        # 640x480 white image
+        img = Image.new("RGB", (640, 480), color=(200, 200, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.3, 0.2, 0.4, 0.6)}
+        result = crop_snapshot_bytes(raw_bytes, geometry)
+
+        assert result is not None
+        parsed = Image.open(io.BytesIO(result))
+        assert parsed.format == "JPEG"
+
+    def test_crop_snapshot_bytes_output_is_2to1_ratio(self):
+        """Output image should be close to 2:1 height:width."""
+        from snapshot_crop import crop_snapshot_bytes
+
+        img = Image.new("RGB", (640, 480))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.2, 0.1, 0.6, 0.8)}
+        result = crop_snapshot_bytes(raw_bytes, geometry)
+
+        assert result is not None
+        parsed = Image.open(io.BytesIO(result))
+        w, h = parsed.size
+        ratio = h / w
+        assert abs(ratio - 2.0) < 0.15, f"Expected ~2.0, got {ratio:.3f}"
+
+    def test_crop_snapshot_bytes_returns_none_for_missing_geometry(self):
+        """None geometry should produce None output."""
+        from snapshot_crop import crop_snapshot_bytes
+
+        img = Image.new("RGB", (200, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        assert crop_snapshot_bytes(buf.getvalue(), None) is None
+
+    def test_crop_snapshot_bytes_letterboxes_edge_crop(self):
+        """Person at image edge should produce a letterboxed 2:1 output."""
+        from snapshot_crop import crop_snapshot_bytes
+
+        img = Image.new("RGB", (640, 480))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        # Top-left corner — expansion will push rect out of bounds
+        geometry = {"box": (0.0, 0.0, 0.15, 0.30)}
+        result = crop_snapshot_bytes(raw_bytes, geometry)
+
+        assert result is not None
+        parsed = Image.open(io.BytesIO(result))
+        w, h = parsed.size
+        ratio = h / w
+        assert abs(ratio - 2.0) < 0.15, f"Expected ~2.0 letterboxed, got {ratio:.3f}"
+
+
+class TestCropSnapshotPil:
+    """Tests for crop_snapshot_pil and pil_to_jpeg_bytes (Gap 3 lossless path)."""
+
+    def test_crop_snapshot_pil_returns_pil_image(self):
+        """crop_snapshot_pil should return a PIL Image, not bytes."""
+        from snapshot_crop import crop_snapshot_pil
+
+        img = Image.new("RGB", (640, 480), color=(100, 150, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.2, 0.1, 0.5, 0.7)}
+        result = crop_snapshot_pil(raw_bytes, geometry)
+
+        assert result is not None
+        assert isinstance(result, Image.Image)
+
+    def test_crop_snapshot_pil_matches_bytes_dimensions(self):
+        """PIL and bytes crop should produce the same image dimensions."""
+        from snapshot_crop import crop_snapshot_pil, crop_snapshot_bytes
+
+        img = Image.new("RGB", (640, 480))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.2, 0.1, 0.4, 0.6)}
+        pil_result = crop_snapshot_pil(raw_bytes, geometry)
+        bytes_result = crop_snapshot_bytes(raw_bytes, geometry)
+
+        assert pil_result is not None and bytes_result is not None
+        bytes_img = Image.open(io.BytesIO(bytes_result))
+        assert pil_result.size == bytes_img.size
+
+    def test_crop_snapshot_pil_is_rgb(self):
+        """Returned PIL image must be in RGB mode."""
+        from snapshot_crop import crop_snapshot_pil
+
+        img = Image.new("RGBA", (640, 480), color=(10, 20, 30, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.1, 0.1, 0.8, 0.8)}
+        result = crop_snapshot_pil(raw_bytes, geometry)
+
+        assert result is not None
+        assert result.mode == "RGB"
+
+    def test_crop_snapshot_pil_returns_none_for_missing_geometry(self):
+        """None geometry should return None."""
+        from snapshot_crop import crop_snapshot_pil
+
+        img = Image.new("RGB", (200, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        assert crop_snapshot_pil(buf.getvalue(), None) is None
+
+    def test_pil_to_jpeg_bytes_produces_valid_jpeg(self):
+        """pil_to_jpeg_bytes should produce decodable JPEG bytes."""
+        from snapshot_crop import pil_to_jpeg_bytes
+
+        img = Image.new("RGB", (128, 256), color=(255, 0, 0))
+        result = pil_to_jpeg_bytes(img, quality=85)
+
+        assert isinstance(result, bytes)
+        decoded = Image.open(io.BytesIO(result))
+        assert decoded.format == "JPEG"
+        assert decoded.size == (128, 256)
+
+    def test_pil_avoids_jpeg_artifacts_vs_bytes(self):
+        """PIL path should have no JPEG encoding loss; bytes path introduces DCT artifacts."""
+        from snapshot_crop import crop_snapshot_pil, crop_snapshot_bytes
+
+        # Solid-colour PNG source (lossless, no pre-existing JPEG artifacts)
+        img = Image.new("RGB", (640, 480), color=(200, 100, 50))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.25, 0.25, 0.4, 0.4)}  # well inside frame
+
+        pil_crop = crop_snapshot_pil(raw_bytes, geometry)
+        bytes_crop = crop_snapshot_bytes(raw_bytes, geometry)
+
+        assert pil_crop is not None and bytes_crop is not None
+
+        # Re-encode the PIL crop at max quality → if we then compare with
+        # pil_crop, MSE should be very small (only colour subsampling loss
+        # from lossless→JPEG at q=100 is negligible on solid colour).
+        # Re-encode at q=50 to amplify JPEG effects for a more robust assertion.
+        pil_via_jpeg = Image.open(io.BytesIO(
+            crop_snapshot_bytes(raw_bytes, geometry, quality=50)
+        ))
+
+        pil_arr = np.array(pil_crop).astype(float)
+        jpeg_arr = np.array(pil_via_jpeg).astype(float)
+
+        # Force same size for comparison
+        size = (min(pil_crop.width, pil_via_jpeg.width),
+                min(pil_crop.height, pil_via_jpeg.height))
+        pil_small = np.array(pil_crop.resize(size)).astype(float)
+        jpeg_small = np.array(pil_via_jpeg.resize(size)).astype(float)
+
+        mse_pil_vs_jpeg = float(np.mean((pil_small - jpeg_small) ** 2))
+
+        # JPEG at q=50 on a region with colour gradients must distort pixels.
+        assert mse_pil_vs_jpeg > 0, "Expected JPEG encoding to change pixel values"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
