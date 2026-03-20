@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+
+## [0.6.0] - 2026-03-20
+
+### Added
+- release: Generate release notes from CHANGELOG and create GitHub release
+- Add icon and logo images for branding
+- Add script to check for broken local Markdown links
+- Revise README structure with improved headings and table of contents
+- Enhance README with detailed architecture and snapshot flow descriptions
+### Fixed
+- Update links in README and Implementation Summary for correct file paths
+### Changed
+- Improve code formatting for readability in identity_service.py, snapshot_crop.py, and test files
+- Add ReID model embedding extraction from PIL images and enhance snapshot handling
+- Refactor test cases and utility functions for improved readability and consistency
+- chore: Remove trailing whitespace in CHANGELOG
 ## [0.5.9] - 2026-03-07
 
 ### Added
