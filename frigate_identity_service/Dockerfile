@@ -41,7 +41,7 @@ RUN if [ "$USE_GPU" = "true" ]; then \
     fi
 
 # Copy Python modules and download script
-COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py download_weights.py debug_logger.py ./
+COPY identity_service.py embedding_store.py reid_model.py matcher.py mqtt_utils.py download_weights.py debug_logger.py snapshot_crop.py ./
 
 # Bundle OSNet weights at build time so startup requires no network access.
 # TORCH_HOME is set so torchreid caches into /build/weights inside the image.
