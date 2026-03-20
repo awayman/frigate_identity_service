@@ -223,9 +223,7 @@ def validate_config():
         )
 
     # Validate snapshot fetch mode
-    snapshot_fetch_mode = os.getenv(
-        "SNAPSHOT_FETCH_MODE", "clean_if_available"
-    ).lower()
+    snapshot_fetch_mode = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
     valid_snapshot_fetch_modes = {"thumbnail", "snapshot", "clean_if_available"}
     if snapshot_fetch_mode not in valid_snapshot_fetch_modes:
         errors.append(
@@ -810,9 +808,13 @@ def fetch_snapshot_from_api(
 
     if crop and SNAPSHOT_FETCH_MODE == "clean_if_available" and SNAPSHOT_LOCAL_CROP:
         if crop_geometry is None:
-            crop_geometry = _extract_snapshot_crop_geometry(_fetch_event_details(event_id))
+            crop_geometry = _extract_snapshot_crop_geometry(
+                _fetch_event_details(event_id)
+            )
 
-    cache_key = _build_snapshot_cache_key(event_id, crop, quality, height, crop_geometry)
+    cache_key = _build_snapshot_cache_key(
+        event_id, crop, quality, height, crop_geometry
+    )
 
     # Check cache
     if cache_key in snapshot_cache:
@@ -868,7 +870,9 @@ def fetch_snapshot_from_api(
                 e,
             )
 
-    logger.warning("[API] Failed to fetch snapshot for %s using all candidates", event_id)
+    logger.warning(
+        "[API] Failed to fetch snapshot for %s using all candidates", event_id
+    )
     return None
 
 

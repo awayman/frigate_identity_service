@@ -661,9 +661,9 @@ class TestIdentityLifecycleHandlers:
         debug_logs = []
         published = []
 
-        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
-            (args, kwargs)
-        ) or "snapshot-base64"
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: (
+            fetch_calls.append((args, kwargs)) or "snapshot-base64"
+        )
         ns["embedding_store"] = SimpleNamespace(
             store_embedding=lambda *args: stored_embeddings.append(args),
             get_all_embeddings=lambda: {},
@@ -718,9 +718,9 @@ class TestIdentityLifecycleHandlers:
         published = []
         reid_logs = []
 
-        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: fetch_calls.append(
-            (args, kwargs)
-        ) or "snapshot-base64"
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: (
+            fetch_calls.append((args, kwargs)) or "snapshot-base64"
+        )
         ns["embedding_store"] = SimpleNamespace(
             store_embedding=lambda *args: None,
             get_all_embeddings=lambda: {"Bob": ([0.9], "driveway", 0.8)},

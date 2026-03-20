@@ -175,7 +175,9 @@ def crop_snapshot_bytes(
     Returns:
         JPEG bytes of the cropped region, or ``None`` on failure.
     """
-    crop_rect = build_local_crop_rect(crop_geometry, padding_x=padding_x, padding_y=padding_y)
+    crop_rect = build_local_crop_rect(
+        crop_geometry, padding_x=padding_x, padding_y=padding_y
+    )
     if not crop_rect:
         return None
 
@@ -232,7 +234,9 @@ def crop_snapshot_pil(
     Returns:
         PIL RGB Image of the cropped region, or ``None`` on failure.
     """
-    crop_rect = build_local_crop_rect(crop_geometry, padding_x=padding_x, padding_y=padding_y)
+    crop_rect = build_local_crop_rect(
+        crop_geometry, padding_x=padding_x, padding_y=padding_y
+    )
     if not crop_rect:
         return None
 

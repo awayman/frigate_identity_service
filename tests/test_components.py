@@ -342,7 +342,7 @@ class TestLocalCropHelpers:
         left, top, right, bottom = rect
         h = bottom - top
         w = right - left
-        assert h / w >= 1.9, f"Expected ratio >= 1.9, got {h/w:.3f}"
+        assert h / w >= 1.9, f"Expected ratio >= 1.9, got {h / w:.3f}"
 
     def test_build_crop_rect_returns_none_for_missing_geometry(self):
         """None or empty geometry should return None."""
@@ -549,16 +549,15 @@ class TestCropSnapshotPil:
         # pil_crop, MSE should be very small (only colour subsampling loss
         # from lossless→JPEG at q=100 is negligible on solid colour).
         # Re-encode at q=50 to amplify JPEG effects for a more robust assertion.
-        pil_via_jpeg = Image.open(io.BytesIO(
-            crop_snapshot_bytes(raw_bytes, geometry, quality=50)
-        ))
-
-        pil_arr = np.array(pil_crop).astype(float)
-        jpeg_arr = np.array(pil_via_jpeg).astype(float)
+        pil_via_jpeg = Image.open(
+            io.BytesIO(crop_snapshot_bytes(raw_bytes, geometry, quality=50))
+        )
 
         # Force same size for comparison
-        size = (min(pil_crop.width, pil_via_jpeg.width),
-                min(pil_crop.height, pil_via_jpeg.height))
+        size = (
+            min(pil_crop.width, pil_via_jpeg.width),
+            min(pil_crop.height, pil_via_jpeg.height),
+        )
         pil_small = np.array(pil_crop.resize(size)).astype(float)
         jpeg_small = np.array(pil_via_jpeg.resize(size)).astype(float)
 
@@ -570,5 +569,3 @@ class TestCropSnapshotPil:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-
-
