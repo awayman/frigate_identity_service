@@ -113,28 +113,44 @@ Simplified flowchart:
 
 ```mermaid
 flowchart LR
-  A[Frigate person detection] --> B[MQTT: frigate/events]
-  A --> C[MQTT: frigate/tracked_object_update face]
+  A[Frigate detection pipeline] --> B[MQTT: frigate/events<br/>type new update end]
+  A --> C[MQTT: frigate/tracked_object_update<br/>type face]
   A --> D[MQTT: frigate/camera/person/snapshot]
+  A --> V[MQTT: frigate/camera/car-or-truck/snapshot]
 
-  B --> E[Identity Service face-first decision<br/>facial_recognition or reid_model]
-  C --> E
-  E --> F[Publish identity/person/person_id]
-  E --> G[Queue camera+person for snapshot correlation]
-  E --> H[Fetch API snapshot and store embedding]
+  B --> E{Face identity available?}
+  C --> F[Identity Service face update path]
 
-  D --> I[Correlate MQTT snapshot to queued person]
-  I --> J[Publish identity/snapshots/person_id]
-  I --> K[Publish identity/snapshots/person_id/metadata]
+  E -->|Yes sub_label| G[Publish identity/person/person_id<br/>source facial_recognition]
+  E -->|No face| H[Fetch Frigate API snapshot<br/>crop extract embedding]
+  H --> I{ReID match above threshold?}
+  I -->|Yes| J[Publish identity/person/person_id<br/>source reid_model]
+  I -->|No| K[No identity publish]
 
-  F --> L[HA sensor updates person status/location]
-  J --> M[HA camera updates snapshot image]
+  B -->|type end + recognized person| L[Fetch completed event snapshot<br/>store embedding]
 
-  L --> N[Dashboard card]
-  M --> N
+  G --> M[Queue camera+person for snapshot correlation]
+  J --> M
+  F --> N[Publish identity/person/person_id<br/>source face_recognition_update]
+  N --> M
 
-  O[HA automation or service call] --> P[MQTT: frigate_identity/debug/set]
-  P --> Q[Identity Service toggles debug logger]
+  D --> O[Correlate snapshot by camera + time window]
+  O --> P[Publish identity/snapshots/person_id retained]
+  O --> Q[Publish identity/snapshots/person_id/metadata]
+
+  V --> R[Publish identity/vehicle/detected]
+  V --> S[Publish identity/snapshots/vehicle_camera retained]
+
+  G --> T[HA updates person sensors]
+  J --> T
+  N --> T
+  P --> U[HA updates person camera]
+  T --> W[Dashboard person card]
+  U --> W
+  S --> X[Dashboard vehicle card automation]
+
+  Y[HA automation or service call] --> Z[MQTT: frigate_identity/debug/set]
+  Z --> AA[Identity Service toggles debug logging]
 ```
 
 Sequence diagram (topic-by-topic):
@@ -149,27 +165,40 @@ sequenceDiagram
   participant H as HA Integration
   participant D as Lovelace Dashboard
 
-  F->>M: frigate/events (event_id, camera, sub_label?)
+  F->>M: frigate/events (type=new/update, event_id, camera, sub_label?)
   M->>S: frigate/events
-  S->>S: face-first decision\n(sub_label first, else ReID via API snapshot)
-  S->>S: store/reinforce embedding when identity is known
-  S->>M: identity/person/{person_id}
+  alt sub_label present
+    S->>S: cache recognized event + queue camera/person
+    S->>M: identity/person/{person_id} (source=facial_recognition)
+  else no sub_label
+    S->>S: fetch API snapshot + extract embedding
+    alt ReID match
+      S->>S: queue camera/person
+      S->>M: identity/person/{person_id} (source=reid_model)
+    else no match
+      S->>S: keep tracking only (no identity publish)
+    end
+  end
 
   F->>M: frigate/tracked_object_update (type=face, name, score)
   M->>S: frigate/tracked_object_update
-  S->>S: update identity queue + optional embedding learning
-  S->>M: identity/person/{person_id}
+  S->>S: queue camera/person + cache recognized event
+  S->>M: identity/person/{person_id} (source=face_recognition_update)
+
+  F->>M: frigate/events (type=end, event_id)
+  M->>S: frigate/events end
+  S->>S: if event recognized, fetch completed snapshot and store embedding
 
   F->>M: frigate/{camera}/person/snapshot (JPEG)
   M->>S: frigate/{camera}/person/snapshot
   S->>S: correlate by camera + time window
-  S->>M: identity/snapshots/{person_id} (JPEG)
+  S->>M: identity/snapshots/{person_id} (JPEG, retained)
   S->>M: identity/snapshots/{person_id}/metadata
 
   F->>M: frigate/{camera}/car|truck/snapshot (JPEG)
   M->>S: vehicle snapshot
   S->>M: identity/vehicle/detected
-  S->>M: identity/snapshots/vehicle_{camera}
+  S->>M: identity/snapshots/vehicle_{camera} (JPEG, retained)
 
   M->>H: identity/person/{person_id}
   H->>H: update registry + location entities
