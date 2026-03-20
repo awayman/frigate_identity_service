@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.1] - 2026-03-20
+
+### Fixed
+- Add snapshot_crop.py to Dockerfile for complete module inclusion
+### Changed
+- docs: Update flowchart and sequence diagram in README for improved clarity on identity service processes
 ## [0.6.0] - 2026-03-20
 
 ### Added

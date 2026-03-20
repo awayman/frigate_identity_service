@@ -1,3 +1,11 @@
+## 0.6.1
+
+### Fixed
+- Add snapshot_crop.py to Dockerfile for complete module inclusion
+
+### Changed
+- docs: Update flowchart and sequence diagram in README for improved clarity on identity service processes
+
 ## 0.6.0
 
 ### Added
