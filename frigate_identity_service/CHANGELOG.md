@@ -1,3 +1,8 @@
+## 0.6.3
+
+### Added
+- Add snapshot publishing functionality for identity events
+
 ## 0.6.2
 
 ### Added
