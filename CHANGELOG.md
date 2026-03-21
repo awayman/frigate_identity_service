@@ -8,16 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Add `min_person_detection_confidence` add-on option (default `0.80`) to reject low-confidence person detections before identity publish/ReID.
 
 ### Changed
-- Filter low-confidence `frigate/events` person detections and `tracked_object_update` face updates in `identity_service.py` using `MIN_PERSON_DETECTION_CONFIDENCE`.
 
 ### Fixed
 
 ### Removed
 
 
+## [0.6.6] - 2026-03-21
+
+### Added
+- Add min_person_detection_confidence option and filter low-confidence detections
 ## [0.6.5] - 2026-03-21
 
 ### Added

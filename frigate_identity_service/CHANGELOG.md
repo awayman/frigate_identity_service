@@ -1,3 +1,8 @@
+## 0.6.6
+
+### Added
+- Add min_person_detection_confidence option and filter low-confidence detections
+
 ## 0.6.5
 
 ### Added
