@@ -15,6 +15,7 @@ options:
   mqtt_username: ""
   mqtt_password: ""
   frigate_host: "http://homeassistant.local:5000"
+  min_person_detection_confidence: 0.80
   reid_model: "osnet_x1_0"
   reid_device: "cpu"
   reid_similarity_threshold: 0.75
@@ -42,6 +43,7 @@ schema:
   mqtt_username: str?
   mqtt_password: password?
   frigate_host: url
+  min_person_detection_confidence: float(0.0,1.0)
   reid_model: str
   reid_device: str
   reid_similarity_threshold: float(0.0,1.0)

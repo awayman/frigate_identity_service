@@ -595,6 +595,7 @@ class TestIdentityLifecycleHandlers:
             "camera_person_queue": defaultdict(lambda: deque(maxlen=3)),
             "REID_AVAILABLE": True,
             "REID_SIMILARITY_THRESHOLD": 0.75,
+            "MIN_PERSON_DETECTION_CONFIDENCE": 0.80,
         }
         exec(code, ns)
         return ns
@@ -809,6 +810,97 @@ class TestIdentityLifecycleHandlers:
         assert published and published[0][4] == "face_recognition_update"
         assert ns["recognized_person_events"]["evt-4"]["person_id"] == "Carol"
         assert ns["camera_person_queue"]["backyard"][0]["person_id"] == "Carol"
+
+    def test_low_confidence_person_detection_is_ignored(self):
+        """Low-confidence person detections should be ignored before ReID/publish."""
+        ns = self._load_handler_functions()
+        fetch_calls = []
+        published = []
+
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: (
+            fetch_calls.append((args, kwargs)) or "snapshot-base64"
+        )
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: None,
+            get_all_embeddings=lambda: {"Bob": ([0.9], "driveway", 0.8)},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1],
+            extract_embedding_from_pil=lambda image: [0.1],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: None,
+            log_reid_match=lambda **kwargs: None,
+            log_reid_no_match=lambda **kwargs: None,
+        )
+        ns["embedding_matcher"] = SimpleNamespace(
+            find_best_match=lambda *args, **kwargs: ("Bob", 0.88),
+            find_top_k_matches=lambda *args, **kwargs: [("Bob", 0.88)],
+        )
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+
+        payload = {
+            "type": "update",
+            "after": {
+                "id": "evt-low-1",
+                "camera": "driveway",
+                "label": "person",
+                "sub_label": None,
+                "current_zones": ["driveway"],
+                "top_score": 0.78,
+                "frame_time": 6789.0,
+            },
+        }
+        msg = SimpleNamespace(
+            topic="frigate/events",
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+
+        ns["handle_frigate_event"](SimpleNamespace(), msg)
+
+        assert fetch_calls == []
+        assert published == []
+        assert len(ns["camera_person_queue"]["driveway"]) == 0
+
+    def test_low_confidence_face_update_is_ignored(self):
+        """Low-confidence face updates should not publish or cache identity."""
+        ns = self._load_handler_functions()
+        published = []
+
+        ns["publish_identity_event"] = lambda *args: published.append(args)
+        ns["fetch_snapshot_from_api"] = lambda *args, **kwargs: None
+        ns["embedding_store"] = SimpleNamespace(
+            store_embedding=lambda *args: None,
+            get_all_embeddings=lambda: {},
+        )
+        ns["reid_model"] = SimpleNamespace(
+            extract_embedding=lambda snapshot: [0.1],
+            extract_embedding_from_pil=lambda image: [0.1],
+        )
+        ns["debug_logger"] = SimpleNamespace(
+            log_facial_recognition=lambda **kwargs: None,
+            log_reid_match=lambda **kwargs: None,
+            log_reid_no_match=lambda **kwargs: None,
+        )
+
+        payload = {
+            "type": "face",
+            "id": "evt-low-face",
+            "name": "Carol",
+            "score": 0.78,
+            "camera": "backyard",
+            "timestamp": 7890.1,
+        }
+        msg = SimpleNamespace(
+            topic="frigate/tracked_object_update",
+            payload=json.dumps(payload).encode("utf-8"),
+        )
+
+        ns["handle_tracked_object_update"](SimpleNamespace(), msg)
+
+        assert published == []
+        assert "evt-low-face" not in ns["recognized_person_events"]
+        assert len(ns["camera_person_queue"]["backyard"]) == 0
 
 
 if __name__ == "__main__":

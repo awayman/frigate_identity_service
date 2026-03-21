@@ -184,6 +184,9 @@ FRIGATE_HOST = os.getenv("FRIGATE_HOST", "http://localhost:5000")
 REID_MODEL = os.getenv("REID_MODEL", "osnet_x1_0")
 REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.75"))
+MIN_PERSON_DETECTION_CONFIDENCE = float(
+    os.getenv("MIN_PERSON_DETECTION_CONFIDENCE", "0.80")
+)
 SNAPSHOT_FETCH_MODE = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
 SNAPSHOT_LOCAL_CROP = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower() == "true"
 PUBLISH_IDENTITY_EVENT_SNAPSHOT = (
@@ -216,6 +219,13 @@ def validate_config():
     if not (0.0 <= REID_SIMILARITY_THRESHOLD <= 1.0):
         errors.append(
             f"REID_SIMILARITY_THRESHOLD must be between 0.0 and 1.0, got {REID_SIMILARITY_THRESHOLD}"
+        )
+
+    # Validate minimum person detection confidence
+    if not (0.0 <= MIN_PERSON_DETECTION_CONFIDENCE <= 1.0):
+        errors.append(
+            "MIN_PERSON_DETECTION_CONFIDENCE must be between 0.0 and 1.0, "
+            f"got {MIN_PERSON_DETECTION_CONFIDENCE}"
         )
 
     # Validate snapshot correlation window
@@ -364,10 +374,11 @@ def validate_config():
     )
     logger.info("  Frigate: %s", FRIGATE_HOST)
     logger.info(
-        "  ReID: model=%s, device=%s, threshold=%.2f",
+        "  ReID: model=%s, device=%s, threshold=%.2f, min_person_confidence=%.2f",
         REID_MODEL,
         REID_DEVICE,
         REID_SIMILARITY_THRESHOLD,
+        MIN_PERSON_DETECTION_CONFIDENCE,
     )
     logger.info(
         "  Snapshots: mode=%s, local_crop=%s, publish_identity_event_snapshot=%s, crop_padding_x=%.2f, crop_padding_y=%.2f",
@@ -1179,6 +1190,19 @@ def handle_frigate_event(client, msg):
     if label != "person":
         return  # Only process person objects
 
+    if confidence < MIN_PERSON_DETECTION_CONFIDENCE:
+        # Filter low-confidence person detections before identity publish/ReID.
+        logger.info(
+            "[EVENT] Skipping low-confidence person detection on %s "
+            "(event=%s, score=%.2f, min=%.2f)",
+            camera,
+            event_id,
+            confidence,
+            MIN_PERSON_DETECTION_CONFIDENCE,
+        )
+        recognized_person_events.pop(event_id, None)
+        return
+
     # Parse sub_label: Frigate sends ["Name", score] or null
     sub_label = None
     if isinstance(raw_sub_label, list) and len(raw_sub_label) >= 2:
@@ -1369,6 +1393,18 @@ def handle_tracked_object_update(client, msg):
         timestamp = payload.get("timestamp", time.time())
 
         if not person_id or not event_id:
+            return
+
+        if score < MIN_PERSON_DETECTION_CONFIDENCE:
+            logger.info(
+                "[FACE_UPDATE] Skipping low-confidence face update on %s "
+                "(event=%s, score=%.2f, min=%.2f)",
+                camera,
+                event_id,
+                score,
+                MIN_PERSON_DETECTION_CONFIDENCE,
+            )
+            recognized_person_events.pop(event_id, None)
             return
 
         logger.info(
