@@ -972,8 +972,72 @@ def _timestamp_to_seconds(timestamp_value):
     return ts
 
 
+def _publish_snapshot_for_identity(
+    client,
+    person_id,
+    event_id,
+    camera,
+    zones,
+    event_payload=None,
+):
+    """Publish a retained person snapshot directly from the Frigate API."""
+    if not person_id or not event_id:
+        return
+
+    try:
+        snapshot_base64 = fetch_snapshot_from_api(
+            event_id,
+            crop=True,
+            event_payload=event_payload,
+        )
+        if not snapshot_base64:
+            logger.debug(
+                "[SNAPSHOT-API] No API snapshot available for %s (%s)",
+                person_id,
+                event_id,
+            )
+            return
+
+        image_bytes = base64.b64decode(snapshot_base64)
+        client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+        snapshot_metadata = {
+            "person_id": person_id,
+            "camera": camera,
+            "timestamp": int(time.time() * 1000),
+            "source": "frigate_api_identity_event",
+            "correlation_confidence": "direct_event_snapshot",
+            "active_persons_count": 1,
+            "zones": list(zones or []),
+            "event_id": event_id,
+        }
+        client.publish(
+            f"identity/snapshots/{person_id}/metadata",
+            json.dumps(snapshot_metadata),
+        )
+        logger.info(
+            "[SNAPSHOT-API] Published direct event snapshot for %s at %s",
+            person_id,
+            camera,
+        )
+    except Exception as e:
+        logger.warning(
+            "[SNAPSHOT-API] Failed to publish direct snapshot for %s (%s): %s",
+            person_id,
+            event_id,
+            e,
+        )
+
+
 def publish_identity_event(
-    client, person_id, camera, confidence, source, zones, event_id, timestamp
+    client,
+    person_id,
+    camera,
+    confidence,
+    source,
+    zones,
+    event_id,
+    timestamp,
+    event_payload=None,
 ):
     """Publish identity event to Home Assistant"""
     snapshot_urls = build_identity_snapshot_urls(event_id)
@@ -1000,6 +1064,14 @@ def publish_identity_event(
         camera,
         zones,
         confidence,
+    )
+    _publish_snapshot_for_identity(
+        client,
+        person_id,
+        event_id,
+        camera,
+        zones,
+        event_payload=event_payload,
     )
 
 
@@ -1111,6 +1183,7 @@ def handle_frigate_event(client, msg):
             current_zones,
             event_id,
             timestamp,
+            after,
         )
 
     # SCENARIO B: Person detected but no face visible - try ReID
@@ -1170,6 +1243,7 @@ def handle_frigate_event(client, msg):
                     current_zones,
                     event_id,
                     timestamp,
+                    after,
                 )
             else:
                 # Log no-match for debugging
@@ -1269,6 +1343,7 @@ def handle_tracked_object_update(client, msg):
             [],
             event_id,
             timestamp,
+            payload,
         )
     else:
         logger.debug("[TRACKED_UPDATE] Ignoring update type: %s", update_type)
@@ -1354,7 +1429,9 @@ def handle_snapshot_for_display(client, msg):
                 break
 
         if not matched_person or "person_id" not in matched_person:
-            logger.debug("[SNAPSHOT] No correlation match found for %s snapshot", camera)
+            logger.debug(
+                "[SNAPSHOT] No correlation match found for %s snapshot", camera
+            )
             return
 
         confidence_note = "fallback_recent_no_window_match"
