@@ -1,5 +1,5 @@
 name: "Frigate Identity Service"
-version: "0.6.3"
+version: "0.6.4"
 slug: "frigate_identity_service"
 description: "Person re-identification service for Frigate NVR. Maintains identity continuity using ReID when faces are not visible. GPU acceleration is not required."
 url: "https://github.com/awayman/frigate_identity_service"

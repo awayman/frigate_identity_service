@@ -1,3 +1,8 @@
+## 0.6.4
+
+### Added
+- Add runtime embedding clear command via MQTT
+
 ## 0.6.3
 
 ### Added
