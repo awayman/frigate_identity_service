@@ -556,6 +556,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate_identity/debug/set")
     logger.info("Subscribed to: frigate_identity/debug/set")
 
+    # Subscribe to embedding maintenance commands
+    client.subscribe("frigate_identity/embeddings/clear")
+    logger.info("Subscribed to: frigate_identity/embeddings/clear")
+
     logger.info(
         "Frigate Identity Service started successfully (model=%s, device=%s, threshold=%.2f)",
         REID_MODEL,
@@ -573,6 +577,8 @@ def on_message(client, userdata, msg):
             handle_tracked_object_update(client, msg)
         elif msg.topic == "frigate_identity/debug/set":
             handle_debug_control(client, msg)
+        elif msg.topic == "frigate_identity/embeddings/clear":
+            handle_embedding_clear_control(client, msg)
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
     except Exception as e:
@@ -610,6 +616,47 @@ def handle_debug_control(client, msg):
         logger.warning("[DEBUG] Invalid JSON in debug control message")
     except Exception as e:
         logger.error("[DEBUG] Error handling debug control: %s", e)
+
+
+def handle_embedding_clear_control(client, msg):
+    """Handle runtime embedding clear commands from Home Assistant.
+
+    Payload: {"confirm": true, "reason": "optional string"}
+    Publishes state to: frigate_identity/embeddings/state
+    """
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+        confirm = bool(payload.get("confirm", False))
+        reason = payload.get("reason", "")
+
+        if not confirm:
+            logger.warning(
+                "[EMBEDDINGS] Ignored clear command without confirm=true"
+            )
+            return
+
+        embedding_store.clear()
+
+        state_message = {
+            "cleared": True,
+            "reason": reason,
+            "timestamp": int(time.time() * 1000),
+        }
+        client.publish(
+            "frigate_identity/embeddings/state",
+            json.dumps(state_message),
+            retain=True,
+        )
+
+        logger.warning(
+            "[EMBEDDINGS] Cleared embedding store via command (reason=%s)",
+            reason or "not provided",
+        )
+
+    except json.JSONDecodeError:
+        logger.warning("[EMBEDDINGS] Invalid JSON in clear control message")
+    except Exception as e:
+        logger.error("[EMBEDDINGS] Error handling clear control: %s", e)
 
 
 def _normalize_relative_rect(rect):

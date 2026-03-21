@@ -99,6 +99,7 @@ fully supported.
 - `frigate/+/car/snapshot` - Vehicle detection
 - `frigate/+/truck/snapshot` - Vehicle detection
 - `frigate_identity/debug/set` - Runtime debug logging toggle control
+- `frigate_identity/embeddings/clear` - Runtime full embedding-store clear control
 
 ### Publications
 - `identity/person/{person_id}` - Person identity events
@@ -106,6 +107,7 @@ fully supported.
 - `identity/snapshots/{person_id}/metadata` - Snapshot correlation metadata
 - `identity/vehicle/detected` - Vehicle detection events
 - `frigate_identity/debug/state` - Current debug logging state
+- `frigate_identity/embeddings/state` - Last embedding clear status/event
 
 ## Snapshot Flow (Detection → Dashboard)
 
@@ -326,6 +328,11 @@ DEBUG_RETENTION_DAYS=7
 Via Home Assistant Add-on UI or MQTT:
 ```bash
 mosquitto_pub -t frigate_identity/debug/set -m '{"enabled": true}'
+```
+
+Clear embeddings via MQTT command:
+```bash
+mosquitto_pub -t frigate_identity/embeddings/clear -m '{"confirm": true, "reason": "manual reset"}'
 ```
 
 The service publishes retained debug status to `frigate_identity/debug/state` so dashboards/automations can read current state after restart.
