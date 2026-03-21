@@ -1,3 +1,8 @@
+## 0.6.5
+
+### Added
+- Add configuration option to publish identity event snapshots
+
 ## 0.6.4
 
 ### Added
