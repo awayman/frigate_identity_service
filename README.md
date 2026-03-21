@@ -81,6 +81,7 @@ fully supported.
 | `EMBEDDING_FULL_CLEAR_TIME` | `00:00` | Daily clear time (`HH:MM` 24h) when `EMBEDDING_RETENTION_MODE=full_clear_daily` |
 | `SNAPSHOT_FETCH_MODE` | `clean_if_available` | Snapshot preference for ReID input: `clean_if_available`, `snapshot`, or `thumbnail` |
 | `SNAPSHOT_LOCAL_CROP` | `true` | When using clean snapshots, crop locally from Frigate event box metadata for tighter person crops |
+| `PUBLISH_IDENTITY_EVENT_SNAPSHOT` | `false` | Publish extra API-fetched identity snapshots to `identity/snapshots/{person_id}`; keep `false` to avoid overwrite/race with Frigate MQTT snapshot stream |
 | `SNAPSHOT_CROP_PADDING_X` | `0.05` | Horizontal padding (fraction of box width) added around the detected person box |
 | `SNAPSHOT_CROP_PADDING_Y` | `0.20` | Vertical padding (fraction of box height) added around the detected person box |
 | `SNAPSHOT_CORRELATION_WINDOW` | `2.0` | Seconds to correlate MQTT snapshots to persons |
@@ -295,6 +296,12 @@ Snapshot defaults now favor cleaner ReID inputs. To force the previous thumbnail
 ```bash
 SNAPSHOT_FETCH_MODE=thumbnail
 SNAPSHOT_LOCAL_CROP=false
+```
+
+If you want to also publish the additional API snapshot path (can overwrite MQTT snapshots with different framing), enable:
+
+```bash
+PUBLISH_IDENTITY_EVENT_SNAPSHOT=true
 ```
 
 ## Home Assistant Add-on

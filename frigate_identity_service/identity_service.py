@@ -186,6 +186,9 @@ REID_DEVICE = os.getenv("REID_DEVICE", "auto")
 REID_SIMILARITY_THRESHOLD = float(os.getenv("REID_SIMILARITY_THRESHOLD", "0.75"))
 SNAPSHOT_FETCH_MODE = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
 SNAPSHOT_LOCAL_CROP = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower() == "true"
+PUBLISH_IDENTITY_EVENT_SNAPSHOT = (
+    os.getenv("PUBLISH_IDENTITY_EVENT_SNAPSHOT", "false").lower() == "true"
+)
 # Asymmetric padding: more vertical context (head/feet) than horizontal.
 SNAPSHOT_CROP_PADDING_X = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
 SNAPSHOT_CROP_PADDING_Y = float(os.getenv("SNAPSHOT_CROP_PADDING_Y", "0.20"))
@@ -252,6 +255,16 @@ def validate_config():
         errors.append(
             "SNAPSHOT_LOCAL_CROP must be 'true' or 'false', "
             f"got '{snapshot_local_crop}'"
+        )
+
+    # Validate API event snapshot publishing toggle
+    publish_identity_event_snapshot = os.getenv(
+        "PUBLISH_IDENTITY_EVENT_SNAPSHOT", "false"
+    ).lower()
+    if publish_identity_event_snapshot not in {"true", "false"}:
+        errors.append(
+            "PUBLISH_IDENTITY_EVENT_SNAPSHOT must be 'true' or 'false', "
+            f"got '{publish_identity_event_snapshot}'"
         )
 
     # Validate max tracked persons
@@ -357,9 +370,10 @@ def validate_config():
         REID_SIMILARITY_THRESHOLD,
     )
     logger.info(
-        "  Snapshots: mode=%s, local_crop=%s, crop_padding_x=%.2f, crop_padding_y=%.2f",
+        "  Snapshots: mode=%s, local_crop=%s, publish_identity_event_snapshot=%s, crop_padding_x=%.2f, crop_padding_y=%.2f",
         snapshot_fetch_mode,
         snapshot_local_crop,
+        publish_identity_event_snapshot,
         snapshot_crop_padding_x,
         snapshot_crop_padding_y,
     )
@@ -1028,6 +1042,9 @@ def _publish_snapshot_for_identity(
     event_payload=None,
 ):
     """Publish a retained person snapshot directly from the Frigate API."""
+    if not PUBLISH_IDENTITY_EVENT_SNAPSHOT:
+        return
+
     if not person_id or not event_id:
         return
 
