@@ -955,6 +955,23 @@ def _store_completed_face_embedding(
         )
 
 
+def _timestamp_to_seconds(timestamp_value):
+    """Normalize epoch timestamps to seconds as float."""
+    if timestamp_value is None:
+        return time.time()
+
+    try:
+        ts = float(timestamp_value)
+    except (TypeError, ValueError):
+        return time.time()
+
+    # Some Frigate payloads may carry milliseconds.
+    if ts > 1e11:
+        ts = ts / 1000.0
+
+    return ts
+
+
 def publish_identity_event(
     client, person_id, camera, confidence, source, zones, event_id, timestamp
 ):
@@ -1005,6 +1022,15 @@ def handle_frigate_event(client, msg):
 
     event_type = payload.get("type")  # "new", "update", or "end"
     after = payload.get("after", {})
+
+    def _normalize_ts(value):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return time.time()
+        if ts > 1e11:
+            ts = ts / 1000.0
+        return ts
 
     camera = after.get("camera")
     event_id = after.get("id")
@@ -1062,7 +1088,7 @@ def handle_frigate_event(client, msg):
     # Add to camera tracking queue for snapshot correlation
     detection_record = {
         "event_id": event_id,
-        "timestamp": timestamp,
+        "timestamp": _normalize_ts(timestamp),
         "zones": current_zones,
         "confidence": confidence,
     }
@@ -1188,6 +1214,15 @@ def handle_tracked_object_update(client, msg):
 
     update_type = payload.get("type")
 
+    def _normalize_ts(value):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return time.time()
+        if ts > 1e11:
+            ts = ts / 1000.0
+        return ts
+
     if update_type == "face":
         person_id = payload.get("name")
         event_id = payload.get("id")
@@ -1209,7 +1244,7 @@ def handle_tracked_object_update(client, msg):
         # Add to correlation queue
         detection_record = {
             "event_id": event_id,
-            "timestamp": timestamp,
+            "timestamp": _normalize_ts(timestamp),
             "zones": [],
             "confidence": score,
             "person_id": person_id,
@@ -1255,6 +1290,15 @@ def handle_snapshot_for_display(client, msg):
     image_bytes = msg.payload
     now = time.time()
 
+    def _normalize_ts(value):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return now
+        if ts > 1e11:
+            ts = ts / 1000.0
+        return ts
+
     if object_type == "person":
         logger.info("[SNAPSHOT] Person snapshot received from %s", camera)
 
@@ -1290,22 +1334,42 @@ def handle_snapshot_for_display(client, msg):
     # Match to most recent person within correlation window
     matched_person = None
     active_persons = []
+    confidence_note = "unknown"
 
     for detection in reversed(recent_detections):  # Most recent first
-        if now - detection["timestamp"] <= SNAPSHOT_CORRELATION_WINDOW:
+        detection_ts = _normalize_ts(detection.get("timestamp"))
+        age_seconds = now - detection_ts
+        if -1.0 <= age_seconds <= SNAPSHOT_CORRELATION_WINDOW:
             if "person_id" in detection:
                 active_persons.append(detection)
                 if matched_person is None:
                     matched_person = detection
 
     if not matched_person or "person_id" not in matched_person:
-        logger.debug("[SNAPSHOT] No correlation match found for %s snapshot", camera)
-        return
+        # Keep dashboard snapshots fresh even if events/snapshots arrive out of
+        # order by using the most recent known person for this camera.
+        for detection in reversed(recent_detections):
+            if "person_id" in detection:
+                matched_person = detection
+                break
+
+        if not matched_person or "person_id" not in matched_person:
+            logger.debug("[SNAPSHOT] No correlation match found for %s snapshot", camera)
+            return
+
+        confidence_note = "fallback_recent_no_window_match"
+        logger.warning(
+            "[SNAPSHOT] Using fallback recent person for %s (window=%.1fs)",
+            camera,
+            SNAPSHOT_CORRELATION_WINDOW,
+        )
 
     person_id = matched_person["person_id"]
 
     # Determine correlation confidence
-    if len(active_persons) == 1:
+    if confidence_note == "fallback_recent_no_window_match":
+        pass
+    elif len(active_persons) == 1:
         confidence_note = "high_confidence"
     elif len(active_persons) > 1:
         confidence_note = "low_confidence_multi_person"
