@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.2] - 2026-03-21
+
+### Added
+- Add timestamp normalization function for improved event handling
 ## [0.6.1] - 2026-03-20
 
 ### Fixed

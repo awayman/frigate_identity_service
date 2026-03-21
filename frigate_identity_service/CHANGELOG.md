@@ -1,3 +1,8 @@
+## 0.6.2
+
+### Added
+- Add timestamp normalization function for improved event handling
+
 ## 0.6.1
 
 ### Fixed
