@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.7] - 2026-03-22
+
+### Added
+- Update health heartbeat to publish every 30 seconds and log status
+- Add display-friendly cropping function and deprecate legacy MQTT snapshot mode
+- Update max tracked persons limit and add box overlap check for ReID
 ## [0.6.6] - 2026-03-21
 
 ### Added

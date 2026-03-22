@@ -1,3 +1,10 @@
+## 0.6.7
+
+### Added
+- Update health heartbeat to publish every 30 seconds and log status
+- Add display-friendly cropping function and deprecate legacy MQTT snapshot mode
+- Update max tracked persons limit and add box overlap check for ReID
+
 ## 0.6.6
 
 ### Added
