@@ -19,6 +19,7 @@ from debug_logger import DebugLogger
 from snapshot_crop import (
     build_local_crop_rect,
     crop_snapshot_bytes,
+    crop_snapshot_bytes_for_display,
     crop_snapshot_pil,
     pil_to_jpeg_bytes,
 )
@@ -190,7 +191,7 @@ MIN_PERSON_DETECTION_CONFIDENCE = float(
 SNAPSHOT_FETCH_MODE = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
 SNAPSHOT_LOCAL_CROP = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower() == "true"
 PUBLISH_IDENTITY_EVENT_SNAPSHOT = (
-    os.getenv("PUBLISH_IDENTITY_EVENT_SNAPSHOT", "false").lower() == "true"
+    os.getenv("PUBLISH_IDENTITY_EVENT_SNAPSHOT", "true").lower() == "true"
 )
 # Asymmetric padding: more vertical context (head/feet) than horizontal.
 SNAPSHOT_CROP_PADDING_X = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
@@ -235,6 +236,13 @@ def validate_config():
             f"SNAPSHOT_CORRELATION_WINDOW must be between 0.1 and 10.0, got {snapshot_window}"
         )
 
+    # Validate snapshot fallback max age
+    snapshot_fallback_max_age = float(os.getenv("SNAPSHOT_FALLBACK_MAX_AGE", "30.0"))
+    if not (1.0 <= snapshot_fallback_max_age <= 3600.0):
+        errors.append(
+            f"SNAPSHOT_FALLBACK_MAX_AGE must be between 1.0 and 3600.0, got {snapshot_fallback_max_age}"
+        )
+
     # Validate snapshot fetch mode
     snapshot_fetch_mode = os.getenv("SNAPSHOT_FETCH_MODE", "clean_if_available").lower()
     valid_snapshot_fetch_modes = {"thumbnail", "snapshot", "clean_if_available"}
@@ -269,7 +277,7 @@ def validate_config():
 
     # Validate API event snapshot publishing toggle
     publish_identity_event_snapshot = os.getenv(
-        "PUBLISH_IDENTITY_EVENT_SNAPSHOT", "false"
+        "PUBLISH_IDENTITY_EVENT_SNAPSHOT", "true"
     ).lower()
     if publish_identity_event_snapshot not in {"true", "false"}:
         errors.append(
@@ -389,6 +397,14 @@ def validate_config():
         snapshot_crop_padding_y,
     )
 
+    # Warn if legacy MQTT display path is enabled (PUBLISH_IDENTITY_EVENT_SNAPSHOT=false)
+    if publish_identity_event_snapshot == "false":
+        logger.warning(
+            "[DEPRECATED] PUBLISH_IDENTITY_EVENT_SNAPSHOT=false (legacy MQTT display path) is deprecated and will be removed in a future release. "
+            "The MQTT person snapshot topic has no event ID and causes misattribution in multi-person scenarios. "
+            "Upgrade to PUBLISH_IDENTITY_EVENT_SNAPSHOT=true (default, recommended) for correct per-event snapshot attribution."
+        )
+
     # Determine default paths for display
     embeddings_path = os.getenv("EMBEDDINGS_DB_PATH") or (
         "/data/embeddings.json"
@@ -471,6 +487,7 @@ def get_default_embeddings_path():
 
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", get_default_embeddings_path())
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
+SNAPSHOT_FALLBACK_MAX_AGE = float(os.getenv("SNAPSHOT_FALLBACK_MAX_AGE", "30.0"))
 MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "10"))
 
 
@@ -568,9 +585,19 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate/tracked_object_update")
     logger.info("Subscribed to: frigate/tracked_object_update")
 
-    # Subscribe to person snapshots for fast display
-    client.subscribe("frigate/+/person/snapshot")
-    logger.info("Subscribed to: frigate/+/person/snapshot")
+    # Subscribe to person snapshots only if using MQTT display path (DEPRECATED legacy mode)
+    # With PUBLISH_IDENTITY_EVENT_SNAPSHOT=true (default), snapshots come via Frigate API
+    # per-event for perfect attribution. MQTT topic has no event ID, causing misattribution.
+    # DEPRECATED: MQTT display path will be removed in future release.
+    if not PUBLISH_IDENTITY_EVENT_SNAPSHOT:
+        client.subscribe("frigate/+/person/snapshot")
+        logger.info(
+            "Subscribed to: frigate/+/person/snapshot [DEPRECATED MQTT display mode - recommend upgrading to PUBLISH_IDENTITY_EVENT_SNAPSHOT=true]"
+        )
+    else:
+        logger.info(
+            "Skipping frigate/+/person/snapshot subscription (PUBLISH_IDENTITY_EVENT_SNAPSHOT=true, recommended)"
+        )
 
     # Optional: Subscribe to car/truck for vehicle detection
     client.subscribe("frigate/+/car/snapshot")
@@ -767,6 +794,21 @@ def _crop_snapshot_bytes(image_bytes, crop_geometry, quality=85):
     )
 
 
+def _crop_snapshot_bytes_for_display(image_bytes, crop_geometry, quality=85):
+    """Delegate to :func:`snapshot_crop.crop_snapshot_bytes_for_display` with service-level padding.
+
+    Used for dashboard display snapshots — skips letterboxing to avoid
+    brown ImageNet-mean padding artifacts on the display.
+    """
+    return crop_snapshot_bytes_for_display(
+        image_bytes,
+        crop_geometry,
+        quality=quality,
+        padding_x=SNAPSHOT_CROP_PADDING_X,
+        padding_y=SNAPSHOT_CROP_PADDING_Y,
+    )
+
+
 def _crop_snapshot_pil(image_bytes, crop_geometry):
     """Delegate to :func:`snapshot_crop.crop_snapshot_pil` with service-level padding."""
     return crop_snapshot_pil(
@@ -874,6 +916,7 @@ def fetch_snapshot_from_api(
     height=400,
     event_payload=None,
     _pil_out=None,
+    display_mode=False,
 ):
     """
     Fetch snapshot from Frigate API for a specific event.
@@ -890,6 +933,8 @@ def fetch_snapshot_from_api(
             directly to :meth:`ReIDModel.extract_embedding_from_pil`, avoiding
             the lossy JPEG encode/decode round-trip.  On cache hits this list
             remains empty and callers should fall back to the base64 path.
+        display_mode: When True, use display-optimized cropping (no letterboxing).
+                      When False (default), use ReID-optimized cropping (with letterboxing).
 
     Returns:
         base64-encoded JPEG string, or None if failed.
@@ -935,20 +980,28 @@ def fetch_snapshot_from_api(
                 and SNAPSHOT_LOCAL_CROP
                 and crop_geometry is not None
             ):
-                # Crop to PIL first — lossless intermediate for the ReID path.
-                pil_crop = _crop_snapshot_pil(image_bytes, crop_geometry)
-                if pil_crop is not None:
-                    if _pil_out is not None:
-                        _pil_out.append(pil_crop)
-                    # JPEG-encode for cache and debug logger (only one encode).
-                    image_bytes = pil_to_jpeg_bytes(pil_crop, quality=quality)
-                else:
-                    # Degenerate bbox — fall back to bytes-only crop.
-                    cropped_bytes = _crop_snapshot_bytes(
+                if display_mode:
+                    # Display mode: skip letterboxing, just crop and return.
+                    cropped_bytes = _crop_snapshot_bytes_for_display(
                         image_bytes, crop_geometry, quality=quality
                     )
                     if cropped_bytes:
                         image_bytes = cropped_bytes
+                else:
+                    # ReID mode: crop to PIL first — lossless intermediate for the ReID path.
+                    pil_crop = _crop_snapshot_pil(image_bytes, crop_geometry)
+                    if pil_crop is not None:
+                        if _pil_out is not None:
+                            _pil_out.append(pil_crop)
+                        # JPEG-encode for cache and debug logger (only one encode).
+                        image_bytes = pil_to_jpeg_bytes(pil_crop, quality=quality)
+                    else:
+                        # Degenerate bbox — fall back to bytes-only crop.
+                        cropped_bytes = _crop_snapshot_bytes(
+                            image_bytes, crop_geometry, quality=quality
+                        )
+                        if cropped_bytes:
+                            image_bytes = cropped_bytes
 
             image_base64 = base64.b64encode(image_bytes).decode("utf-8")
             snapshot_cache[cache_key] = (image_base64, now)
@@ -1083,6 +1136,7 @@ def _publish_snapshot_for_identity(
             event_id,
             crop=True,
             event_payload=event_payload,
+            display_mode=True,
         )
         if not snapshot_base64:
             logger.debug(
@@ -1503,8 +1557,17 @@ def handle_tracked_object_update(client, msg):
 
 def handle_snapshot_for_display(client, msg):
     """
-    FAST PATH: Match MQTT snapshot to recent person detection for live dashboard.
-    Uses temporal correlation - occasional mismatches acceptable for display.
+    DEPRECATED: MQTT display path (PUBLISH_IDENTITY_EVENT_SNAPSHOT=false).
+
+    This function matches MQTT snapshots to recent person detections via temporal correlation.
+    This approach is error-prone for multi-person cameras because the MQTT topic
+    `frigate/{camera}/person/snapshot` has no event ID — all persons' snapshots are interleaved
+    on the same topic, making attribution unreliable.
+
+    RECOMMENDED: Use PUBLISH_IDENTITY_EVENT_SNAPSHOT=true (default) instead, which publishes
+    snapshots via the Frigate HTTP API per-event for perfect per-person attribution.
+
+    This function will be removed in a future release.
     """
     # Extract camera and object type from topic: frigate/{camera}/{object_type}/snapshot
     topic_parts = msg.topic.split("/")
@@ -1548,6 +1611,16 @@ def handle_snapshot_for_display(client, msg):
     if object_type != "person":
         return
 
+    # If using API-first snapshot publishing (default, RECOMMENDED), MQTT person snapshots are not used.
+    # This guards against retained MQTT messages: early return when API publishing is enabled.
+    # DEPRECATED CODE PATH: The entire person branch should be removed when MQTT display path is sunset.
+    if PUBLISH_IDENTITY_EVENT_SNAPSHOT:
+        logger.debug(
+            "[SNAPSHOT] Ignoring MQTT person snapshot for %s (PUBLISH_IDENTITY_EVENT_SNAPSHOT=true, RECOMMENDED)",
+            camera,
+        )
+        return
+
     # Get recent person detections on this camera
     recent_detections = camera_person_queue.get(camera, deque())
 
@@ -1577,6 +1650,15 @@ def handle_snapshot_for_display(client, msg):
         # order by using the most recent known person for this camera.
         for detection in reversed(recent_detections):
             if "person_id" in detection:
+                fallback_age = now - _normalize_ts(detection.get("timestamp"))
+                if fallback_age > SNAPSHOT_FALLBACK_MAX_AGE:
+                    logger.debug(
+                        "[SNAPSHOT] Skipping stale fallback for %s — last detection %.0fs ago (max %.0fs)",
+                        camera,
+                        fallback_age,
+                        SNAPSHOT_FALLBACK_MAX_AGE,
+                    )
+                    return
                 matched_person = detection
                 break
 
@@ -1588,9 +1670,10 @@ def handle_snapshot_for_display(client, msg):
 
         confidence_note = "fallback_recent_no_window_match"
         logger.warning(
-            "[SNAPSHOT] Using fallback recent person for %s (window=%.1fs)",
+            "[SNAPSHOT] Using fallback recent person for %s (window=%.1fs, age=%.0fs)",
             camera,
             SNAPSHOT_CORRELATION_WINDOW,
+            now - _normalize_ts(matched_person.get("timestamp")),
         )
 
     person_id = matched_person["person_id"]

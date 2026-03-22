@@ -31,7 +31,16 @@ options:
   snapshot_local_crop: true
   snapshot_crop_padding_x: 0.05
   snapshot_crop_padding_y: 0.20
+  # DEPRECATED: The following two settings are only used when PUBLISH_IDENTITY_EVENT_SNAPSHOT=false (legacy MQTT display path).
+  # This mode is deprecated and will be removed in a future release.
+  # Snapshot attribution via MQTT temporal correlation is unreliable for multi-person scenarios.
+  # Recommended: Use PUBLISH_IDENTITY_EVENT_SNAPSHOT=true (default) for per-event API-based snapshots.
   snapshot_correlation_window: 2.0
+  snapshot_fallback_max_age: 30.0
+  # DEPRECATED mode option: Set to false to enable legacy MQTT display path (frigate/+/person/snapshot subscription).
+  # Default true uses Frigate HTTP API for per-event snapshot publishing (RECOMMENDED).
+  # Legacy mode will be removed in a future release.
+  publish_identity_event_snapshot: true
   max_tracked_persons_per_camera: 3
   debug_logging_enabled: false
   debug_log_path: "/data/debug"
@@ -60,6 +69,8 @@ schema:
   snapshot_crop_padding_x: float(0.0,1.0)
   snapshot_crop_padding_y: float(0.0,1.0)
   snapshot_correlation_window: float(0.1,10.0)
+  snapshot_fallback_max_age: float(1.0,3600.0)
+  publish_identity_event_snapshot: bool
   max_tracked_persons_per_camera: int(1,20)
   debug_logging_enabled: bool
   debug_log_path: str

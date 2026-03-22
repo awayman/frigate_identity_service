@@ -212,6 +212,68 @@ def crop_snapshot_bytes(
         return None
 
 
+def crop_snapshot_bytes_for_display(
+    image_bytes: bytes,
+    crop_geometry: dict | None,
+    quality: int = 85,
+    padding_x: float = 0.05,
+    padding_y: float = 0.20,
+) -> bytes | None:
+    """Crop a Frigate snapshot for dashboard display (no letterboxing).
+
+    Similar to :func:`crop_snapshot_bytes` but does NOT letterbox when the
+    expanded region extends beyond frame boundaries.  Instead, just crops to
+    what's available and returns it as-is.
+
+    This is suitable for dashboard display where letterboxed brown padding
+    (ImageNet mean colour) would be cosmetically undesirable.  The ReID
+    embedding path should use :func:`crop_snapshot_bytes` (with letterboxing).
+
+    Args:
+        image_bytes: Raw image bytes (any PIL-readable format, e.g. JPEG/WebP).
+        crop_geometry: Bounding box dict from
+            :func:`identity_service._extract_snapshot_crop_geometry`.
+        quality: JPEG output quality (1-95).
+        padding_x: Horizontal padding fraction (relative to bbox width).
+        padding_y: Vertical padding fraction (relative to bbox height).
+
+    Returns:
+        JPEG bytes of the cropped region, or ``None`` on failure.
+    """
+    crop_rect = build_local_crop_rect(
+        crop_geometry, padding_x=padding_x, padding_y=padding_y
+    )
+    if not crop_rect:
+        return None
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image = image.convert("RGB")
+            iw, ih = image.size
+            left, top, right, bottom = crop_rect
+
+            # Clamp to valid pixel range
+            px_left = max(0, int(left * iw))
+            px_top = max(0, int(top * ih))
+            px_right = min(iw, int(right * iw))
+            px_bottom = min(ih, int(bottom * ih))
+
+            if px_right <= px_left or px_bottom <= px_top:
+                return None
+
+            cropped = image.crop((px_left, px_top, px_right, px_bottom))
+
+            # No letterboxing — just return the cropped content for display.
+            # This avoids the brown ImageNet-mean padding on the dashboard.
+
+            output = BytesIO()
+            cropped.save(output, format="JPEG", quality=quality)
+            return output.getvalue()
+    except Exception as exc:
+        _LOGGER.warning("Display snapshot crop failed: %s", exc)
+        return None
+
+
 def crop_snapshot_pil(
     image_bytes: bytes,
     crop_geometry: dict | None,

@@ -567,5 +567,122 @@ class TestCropSnapshotPil:
         assert mse_pil_vs_jpeg > 0, "Expected JPEG encoding to change pixel values"
 
 
+class TestCropSnapshotDisplay:
+    """Tests for crop_snapshot_bytes_for_display (display without letterboxing)."""
+
+    def test_crop_snapshot_for_display_returns_jpeg_bytes(self):
+        """Display crop should return JPEG bytes."""
+        from snapshot_crop import crop_snapshot_bytes_for_display
+
+        img = Image.new("RGB", (640, 480), color=(100, 150, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        geometry = {"box": (0.2, 0.1, 0.5, 0.7)}
+        result = crop_snapshot_bytes_for_display(raw_bytes, geometry)
+
+        assert result is not None
+        assert isinstance(result, bytes)
+        # Verify it's valid JPEG
+        decoded = Image.open(io.BytesIO(result))
+        assert decoded.format == "JPEG"
+
+    def test_crop_snapshot_for_display_no_letterbox_on_edge_crop(self):
+        """Display crop at image edge should NOT letterbox (unlike regular crop)."""
+        from snapshot_crop import crop_snapshot_bytes, crop_snapshot_bytes_for_display
+        from PIL import ImageStat
+
+        img = Image.new("RGB", (640, 480), color=(255, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        # Top-left corner — expansion will push rect out of bounds
+        geometry = {"box": (0.0, 0.0, 0.15, 0.30)}
+
+        # Regular crop letterboxes with ImageNet mean RGB (124,116,104)
+        regular = crop_snapshot_bytes(raw_bytes, geometry)
+        regular_img = Image.open(io.BytesIO(regular))
+
+        # Display crop should NOT letterbox (just return cropped region)
+        display = crop_snapshot_bytes_for_display(raw_bytes, geometry)
+        display_img = Image.open(io.BytesIO(display))
+
+        # Regular should be 2:1 (letterboxed)
+        regular_ratio = regular_img.height / regular_img.width
+        assert abs(regular_ratio - 2.0) < 0.15, f"Regular should be ~2:1, got {regular_ratio:.2f}"
+
+        # Display should NOT be 2:1 (no padding, just the crop)
+        display_ratio = display_img.height / display_img.width
+        assert abs(display_ratio - 2.0) > 0.3, f"Display should NOT be 2:1, got {display_ratio:.2f}"
+
+    def test_crop_snapshot_for_display_no_brown_padding(self):
+        """Display crop should not contain ImageNet mean brown padding."""
+        from snapshot_crop import crop_snapshot_bytes_for_display, IMAGENET_MEAN_RGB
+
+        img = Image.new("RGB", (640, 480), color=(255, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        # Top-left corner — would normally be padded with brown letterbox
+        geometry = {"box": (0.0, 0.0, 0.15, 0.30)}
+        display = crop_snapshot_bytes_for_display(raw_bytes, geometry)
+        display_img = Image.open(io.BytesIO(display))
+
+        # Convert to numpy for pixel analysis
+        pixels = np.array(display_img)
+
+        # Check that no pixels match the brown letterbox colour
+        # (allowing for JPEG compression artifacts ±10 per channel)
+        brown_r, brown_g, brown_b = IMAGENET_MEAN_RGB
+        brown_mask = (
+            (np.abs(pixels[:, :, 0].astype(int) - brown_r) <= 10) &
+            (np.abs(pixels[:, :, 1].astype(int) - brown_g) <= 10) &
+            (np.abs(pixels[:, :, 2].astype(int) - brown_b) <= 10)
+        )
+
+        # For a red source image at image edge, we shouldn't have brown padding
+        brown_pixel_count = np.sum(brown_mask)
+        total_pixels = pixels.shape[0] * pixels.shape[1]
+        brown_fraction = brown_pixel_count / total_pixels
+
+        # Less than 5% should be brown-ish (any present is JPEG compression artifact)
+        assert brown_fraction < 0.05, f"Display crop has too much brown: {brown_fraction:.2%}"
+
+    def test_crop_snapshot_for_display_handles_missing_geometry(self):
+        """Display crop with None geometry should return None."""
+        from snapshot_crop import crop_snapshot_bytes_for_display
+
+        img = Image.new("RGB", (200, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        result = crop_snapshot_bytes_for_display(buf.getvalue(), None)
+
+        assert result is None
+
+    def test_crop_snapshot_for_display_valid_interior_crop(self):
+        """Display crop well inside frame should work correctly."""
+        from snapshot_crop import crop_snapshot_bytes_for_display
+
+        img = Image.new("RGB", (640, 480), color=(50, 100, 150))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        raw_bytes = buf.getvalue()
+
+        # Well inside bounds — should crop cleanly
+        geometry = {"box": (0.25, 0.25, 0.75, 0.75)}
+        result = crop_snapshot_bytes_for_display(raw_bytes, geometry)
+
+        assert result is not None
+        decoded = Image.open(io.BytesIO(result))
+        assert decoded.format == "JPEG"
+        # Should be roughly square (0.25-0.75 is 50% range)
+        ratio = decoded.height / decoded.width
+        assert 0.8 < ratio < 1.2, f"Interior crop should be ~square, got {ratio:.2f}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
