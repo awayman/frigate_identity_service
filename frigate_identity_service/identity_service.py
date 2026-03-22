@@ -1804,7 +1804,7 @@ def schedule_embedding_maintenance():
             )
 
     def _heartbeat():
-        """Log service health status every 5 minutes"""
+        """Publish and log service health every 30 seconds."""
         uptime_seconds = int(time.time() - service_start_time)
         hours = uptime_seconds // 3600
         minutes = (uptime_seconds % 3600) // 60
@@ -1813,7 +1813,25 @@ def schedule_embedding_maintenance():
 
         store_stats = embedding_store.get_stats()
         mqtt_status = "connected" if client.is_connected() else "disconnected"
-        logger.info(
+        try:
+            client.publish(
+                "identity/health",
+                json.dumps(
+                    {
+                        "timestamp": int(time.time() * 1000),
+                        "uptime_seconds": uptime_seconds,
+                        "persons_tracked": store_stats["persons"],
+                        "embeddings": store_stats["embeddings"],
+                        "mqtt_status": mqtt_status,
+                        "reid_enabled": REID_AVAILABLE,
+                    }
+                ),
+                retain=False,
+            )
+        except Exception:
+            logger.exception("[HEARTBEAT] Failed to publish MQTT heartbeat")
+
+        logger.debug(
             "[HEARTBEAT] Service running | Uptime: %s | Persons tracked: %d | Embeddings: %d | MQTT: %s | ReID: %s",
             uptime_str,
             store_stats["persons"],
@@ -1849,10 +1867,10 @@ def schedule_embedding_maintenance():
         )
 
     scheduler.add_job(_cleanup_debug_logs, "cron", hour=1, minute=0)
-    scheduler.add_job(_heartbeat, "interval", minutes=5)
+    scheduler.add_job(_heartbeat, "interval", seconds=30)
     scheduler.start()
     logger.info("[SCHEDULER] Debug log cleanup scheduled (runs at 01:00)")
-    logger.info("[SCHEDULER] Health heartbeat scheduled (every 5 minutes)")
+    logger.info("[SCHEDULER] Health heartbeat scheduled (every 30 seconds)")
     return scheduler
 
 
