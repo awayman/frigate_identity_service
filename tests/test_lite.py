@@ -573,6 +573,8 @@ class TestIdentityLifecycleHandlers:
 
         tree = ast.parse(source)
         wanted = {
+            "_normalize_relative_rect",
+            "_boxes_overlap",
             "_cache_recognized_person_event",
             "_store_completed_face_embedding",
             "handle_frigate_event",
@@ -592,10 +594,11 @@ class TestIdentityLifecycleHandlers:
             "traceback": traceback,
             "logger": logging.getLogger("test_identity_lifecycle"),
             "recognized_person_events": {},
-            "camera_person_queue": defaultdict(lambda: deque(maxlen=3)),
+            "camera_person_queue": defaultdict(lambda: deque(maxlen=10)),
             "REID_AVAILABLE": True,
             "REID_SIMILARITY_THRESHOLD": 0.75,
             "MIN_PERSON_DETECTION_CONFIDENCE": 0.80,
+            "SNAPSHOT_CORRELATION_WINDOW": 2.0,
         }
         exec(code, ns)
         return ns

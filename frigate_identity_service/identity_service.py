@@ -278,10 +278,10 @@ def validate_config():
         )
 
     # Validate max tracked persons
-    max_persons = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
-    if not (1 <= max_persons <= 20):
+    max_persons = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "10"))
+    if not (1 <= max_persons <= 50):
         errors.append(
-            f"MAX_TRACKED_PERSONS_PER_CAMERA must be between 1 and 20, got {max_persons}"
+            f"MAX_TRACKED_PERSONS_PER_CAMERA must be between 1 and 50, got {max_persons}"
         )
 
     # Validate debug retention days
@@ -471,7 +471,7 @@ def get_default_embeddings_path():
 
 EMBEDDINGS_DB_PATH = os.getenv("EMBEDDINGS_DB_PATH", get_default_embeddings_path())
 SNAPSHOT_CORRELATION_WINDOW = float(os.getenv("SNAPSHOT_CORRELATION_WINDOW", "2.0"))
-MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "3"))
+MAX_TRACKED_PERSONS_PER_CAMERA = int(os.getenv("MAX_TRACKED_PERSONS_PER_CAMERA", "10"))
 
 
 def get_default_debug_path():
@@ -706,6 +706,25 @@ def _normalize_relative_rect(rect):
         return None
 
     return (x_pos, y_pos, width, height)
+
+
+def _boxes_overlap(box_a, box_b):
+    """Return True if two (x, y, w, h) normalised boxes share any area.
+
+    Uses a simple intersection check rather than IoU — even a one-pixel sliver
+    of shared area is enough for crop bleed to corrupt an embedding, because
+    the padding and 2:1 aspect expansion applied downstream will amplify the
+    contaminated region further.
+    """
+    if not box_a or not box_b:
+        return False
+    ax, ay, aw, ah = box_a
+    bx, by, bw, bh = box_b
+    if aw <= 0 or ah <= 0 or bw <= 0 or bh <= 0:
+        return False
+    inter_w = min(ax + aw, bx + bw) - max(ax, bx)
+    inter_h = min(ay + ah, by + bh) - max(ay, by)
+    return inter_w > 0 and inter_h > 0
 
 
 def _extract_snapshot_crop_geometry(event_payload):
@@ -1251,6 +1270,7 @@ def handle_frigate_event(client, msg):
         "timestamp": _normalize_ts(timestamp),
         "zones": current_zones,
         "confidence": confidence,
+        "box": _normalize_relative_rect(after.get("box")),
     }
 
     # SCENARIO A: Frigate identified face via facial recognition (sub_label set)
@@ -1277,6 +1297,38 @@ def handle_frigate_event(client, msg):
     # SCENARIO B: Person detected but no face visible - try ReID
     else:
         if not REID_AVAILABLE or reid_model is None:
+            return
+
+        # If facial recognition already captured this event via
+        # handle_tracked_object_update, skip ReID so the more-accurate face ID
+        # is not overwritten by a potentially weaker ReID result.
+        if recognized_person_events.get(event_id):
+            logger.debug(
+                "[REID] Skipping ReID for event %s — face recognition already published",
+                event_id,
+            )
+            return
+
+        # Skip ReID if another nearby person's bbox overlaps — crop padding and
+        # 2:1 aspect expansion would bleed neighbouring appearance into the
+        # query embedding, risking a false identity match.
+        current_box = _normalize_relative_rect(after.get("box"))
+        overlap_ts_floor = _normalize_ts(timestamp) - SNAPSHOT_CORRELATION_WINDOW
+        overlapping = [
+            r
+            for r in camera_person_queue.get(camera, [])
+            if r.get("event_id") != event_id
+            and float(r.get("timestamp", 0)) >= overlap_ts_floor
+            and _boxes_overlap(current_box, r.get("box"))
+        ]
+        if overlapping:
+            logger.warning(
+                "[REID] Skipping event %s on %s — bbox overlaps with %d nearby "
+                "person(s); will retry on next update",
+                event_id,
+                camera,
+                len(overlapping),
+            )
             return
 
         # Try ReID matching via API (accurate)
