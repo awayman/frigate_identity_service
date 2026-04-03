@@ -308,6 +308,8 @@ PUBLISH_IDENTITY_EVENT_SNAPSHOT=true
 
 This repository can be used directly as a Home Assistant Add-on repository.  GPU acceleration is not required when deployed as an Add-on; the service falls back to CPU-based ReID automatically.
 
+The companion Home Assistant integration no longer attempts automatic Supervisor add-on restarts when health checks detect disconnection. Instead, it emits disconnect diagnostics (`frigate_identity.service_disconnected` event and `frigate_identity/debug/health` MQTT messages) so root-cause analysis can be done without automatic restart loops.
+
 1. In Home Assistant, navigate to **Settings → Add-ons → Add-on Store**.
 2. Click the three-dot menu (⋮) and select **Repositories**.
 3. Add this repository URL: `https://github.com/awayman/frigate_identity_service`
