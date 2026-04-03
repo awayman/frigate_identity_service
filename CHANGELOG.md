@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.8] - 2026-04-03
+
+### Fixed
+- tests: remove unused PIL.ImageStat import in test_components.py
+### Changed
+- chore(docs): note removal of automatic add-on restart
 ## [0.6.7] - 2026-03-22
 
 ### Added

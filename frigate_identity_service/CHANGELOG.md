@@ -1,3 +1,11 @@
+## 0.6.8
+
+### Fixed
+- tests: remove unused PIL.ImageStat import in test_components.py
+
+### Changed
+- chore(docs): note removal of automatic add-on restart
+
 ## 0.6.7
 
 ### Added
