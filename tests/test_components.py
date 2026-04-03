@@ -610,11 +610,15 @@ class TestCropSnapshotDisplay:
 
         # Regular should be 2:1 (letterboxed)
         regular_ratio = regular_img.height / regular_img.width
-        assert abs(regular_ratio - 2.0) < 0.15, f"Regular should be ~2:1, got {regular_ratio:.2f}"
+        assert abs(regular_ratio - 2.0) < 0.15, (
+            f"Regular should be ~2:1, got {regular_ratio:.2f}"
+        )
 
         # Display should NOT be 2:1 (no padding, just the crop)
         display_ratio = display_img.height / display_img.width
-        assert abs(display_ratio - 2.0) > 0.3, f"Display should NOT be 2:1, got {display_ratio:.2f}"
+        assert abs(display_ratio - 2.0) > 0.3, (
+            f"Display should NOT be 2:1, got {display_ratio:.2f}"
+        )
 
     def test_crop_snapshot_for_display_no_brown_padding(self):
         """Display crop should not contain ImageNet mean brown padding."""
@@ -637,9 +641,9 @@ class TestCropSnapshotDisplay:
         # (allowing for JPEG compression artifacts ±10 per channel)
         brown_r, brown_g, brown_b = IMAGENET_MEAN_RGB
         brown_mask = (
-            (np.abs(pixels[:, :, 0].astype(int) - brown_r) <= 10) &
-            (np.abs(pixels[:, :, 1].astype(int) - brown_g) <= 10) &
-            (np.abs(pixels[:, :, 2].astype(int) - brown_b) <= 10)
+            (np.abs(pixels[:, :, 0].astype(int) - brown_r) <= 10)
+            & (np.abs(pixels[:, :, 1].astype(int) - brown_g) <= 10)
+            & (np.abs(pixels[:, :, 2].astype(int) - brown_b) <= 10)
         )
 
         # For a red source image at image edge, we shouldn't have brown padding
@@ -648,7 +652,9 @@ class TestCropSnapshotDisplay:
         brown_fraction = brown_pixel_count / total_pixels
 
         # Less than 5% should be brown-ish (any present is JPEG compression artifact)
-        assert brown_fraction < 0.05, f"Display crop has too much brown: {brown_fraction:.2%}"
+        assert brown_fraction < 0.05, (
+            f"Display crop has too much brown: {brown_fraction:.2%}"
+        )
 
     def test_crop_snapshot_for_display_handles_missing_geometry(self):
         """Display crop with None geometry should return None."""
@@ -684,4 +690,3 @@ class TestCropSnapshotDisplay:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-
