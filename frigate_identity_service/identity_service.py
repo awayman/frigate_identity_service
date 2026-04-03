@@ -682,9 +682,7 @@ def handle_embedding_clear_control(client, msg):
         reason = payload.get("reason", "")
 
         if not confirm:
-            logger.warning(
-                "[EMBEDDINGS] Ignored clear command without confirm=true"
-            )
+            logger.warning("[EMBEDDINGS] Ignored clear command without confirm=true")
             return
 
         embedding_store.clear()
