@@ -591,7 +591,6 @@ class TestCropSnapshotDisplay:
     def test_crop_snapshot_for_display_no_letterbox_on_edge_crop(self):
         """Display crop at image edge should NOT letterbox (unlike regular crop)."""
         from snapshot_crop import crop_snapshot_bytes, crop_snapshot_bytes_for_display
-        from PIL import ImageStat
 
         img = Image.new("RGB", (640, 480), color=(255, 0, 0))
         buf = io.BytesIO()
