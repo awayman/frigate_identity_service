@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.9] - 2026-04-03
+
+### Changed
+- Merge pull request #40 from awayman/format/ruff-fix-2026-04-03-083907
 ## [0.6.8] - 2026-04-03
 
 ### Fixed

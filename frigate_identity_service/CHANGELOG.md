@@ -1,3 +1,8 @@
+## 0.6.9
+
+### Changed
+- Merge pull request #40 from awayman/format/ruff-fix-2026-04-03-083907
+
 ## 0.6.8
 
 ### Fixed
