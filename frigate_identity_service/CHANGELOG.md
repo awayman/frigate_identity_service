@@ -1,3 +1,11 @@
+## 0.7.0
+
+### Fixed
+- identity_service: harden false-positive pipeline and test coverage
+
+### Changed
+- format with ruff
+
 ## 0.6.8
 
 ### Fixed
