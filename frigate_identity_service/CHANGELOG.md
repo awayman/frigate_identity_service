@@ -1,3 +1,7 @@
+## 0.7.1
+
+- Maintenance release
+
 ## 0.7.0
 
 ### Fixed
