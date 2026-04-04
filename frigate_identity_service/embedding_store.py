@@ -84,14 +84,15 @@ class EmbeddingStore:
                             embedding = embedding.tolist()
                         elif not isinstance(embedding, list):
                             embedding = list(embedding)
-                        serializable[person_id].append(
-                            {
-                                "embedding": embedding,
-                                "camera": emb_entry["camera"],
-                                "timestamp": emb_entry["timestamp"],
-                                "confidence": emb_entry["confidence"],
-                            }
-                        )
+                        entry_dict = {
+                            "embedding": embedding,
+                            "camera": emb_entry["camera"],
+                            "timestamp": emb_entry["timestamp"],
+                            "confidence": emb_entry["confidence"],
+                        }
+                        if emb_entry.get("event_id"):
+                            entry_dict["event_id"] = emb_entry["event_id"]
+                        serializable[person_id].append(entry_dict)
 
                 with open(self.db_path, "w") as f:
                     json.dump(serializable, f)
@@ -104,6 +105,7 @@ class EmbeddingStore:
         embedding: Union[List, Any],
         camera: str,
         confidence: float = 0.0,
+        event_id: Optional[str] = None,
     ) -> None:
         """Prepend a new embedding for a person, retaining at most MAX_EMBEDDINGS_PER_PERSON.
 
@@ -115,13 +117,16 @@ class EmbeddingStore:
             embedding: Feature vector (numpy array or list)
             camera: Camera where the person was detected
             confidence: Confidence score for this detection
+            event_id: Optional Frigate event ID that produced this embedding
         """
-        new_entry = {
+        new_entry: Dict[str, Any] = {
             "embedding": embedding,
             "camera": camera,
             "timestamp": datetime.now().isoformat(),
             "confidence": confidence,
         }
+        if event_id:
+            new_entry["event_id"] = event_id
 
         with self._lock:
             if person_id not in self.embeddings:
@@ -289,6 +294,67 @@ class EmbeddingStore:
             "remaining_persons": remaining_persons,
             "remaining_embeddings": remaining_embeddings,
         }
+
+    def remove_embeddings_by_event_id(
+        self,
+        person_id: str,
+        event_id: str,
+        *,
+        fallback_to_latest: bool = False,
+    ) -> int:
+        """Remove all embeddings for *person_id* that were created from *event_id*.
+
+        If no entry carries a matching event_id (e.g. embeddings stored before
+        this feature was added) the method falls back to removing the most
+        recent embedding for the person.
+
+        Returns:
+            Number of embedding entries removed (0 if person not found).
+        """
+        if not person_id:
+            return 0
+
+        if not event_id and not fallback_to_latest:
+            return 0
+
+        with self._lock:
+            entries = self.embeddings.get(person_id)
+            if not entries:
+                return 0
+
+            matched = [e for e in entries if e.get("event_id") == event_id]
+            if matched:
+                retained = [e for e in entries if e.get("event_id") != event_id]
+                removed_count = len(matched)
+            elif fallback_to_latest:
+                # Fallback: remove the most recent entry (index 0)
+                retained = entries[1:]
+                removed_count = 1
+            else:
+                retained = entries
+                removed_count = 0
+
+            if retained:
+                self.embeddings[person_id] = retained
+            else:
+                del self.embeddings[person_id]
+
+            if removed_count:
+                self._save()
+
+        return removed_count
+
+    def get_latest_event_id(self, person_id: str) -> Optional[str]:
+        """Return the event_id of the most recent embedding for *person_id*, or None."""
+        with self._lock:
+            entries = self.embeddings.get(person_id)
+            if not entries:
+                return None
+            for entry in entries:
+                eid = entry.get("event_id")
+                if eid:
+                    return eid
+        return None
 
     def get_stats(self) -> Dict[str, int]:
         """Return summary stats for stored embeddings."""
