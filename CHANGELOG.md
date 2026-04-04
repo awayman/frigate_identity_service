@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- tests: add Docker Mosquitto false-positive integration coverage with deterministic cleanup
 
 ### Changed
+- false-positive feedback now publishes an identity/person update event and marks cached events as false_positive
 
 ### Fixed
+- false-positive duplicate reports are now idempotent for explicit event_id and no longer remove unrelated embeddings
 
 ### Removed
 

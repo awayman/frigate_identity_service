@@ -612,6 +612,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate_identity/embeddings/clear")
     logger.info("Subscribed to: frigate_identity/embeddings/clear")
 
+    # Subscribe to false-positive feedback from Home Assistant operators
+    client.subscribe("frigate_identity/feedback/false_positive")
+    logger.info("Subscribed to: frigate_identity/feedback/false_positive")
+
     logger.info(
         "Frigate Identity Service started successfully (model=%s, device=%s, threshold=%.2f)",
         REID_MODEL,
@@ -631,6 +635,8 @@ def on_message(client, userdata, msg):
             handle_debug_control(client, msg)
         elif msg.topic == "frigate_identity/embeddings/clear":
             handle_embedding_clear_control(client, msg)
+        elif msg.topic == "frigate_identity/feedback/false_positive":
+            handle_false_positive_feedback(client, msg)
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
     except Exception as e:
@@ -707,6 +713,277 @@ def handle_embedding_clear_control(client, msg):
         logger.warning("[EMBEDDINGS] Invalid JSON in clear control message")
     except Exception as e:
         logger.error("[EMBEDDINGS] Error handling clear control: %s", e)
+
+
+def handle_false_positive_feedback(client, msg):
+    """Handle false-positive feedback from the Home Assistant operator.
+
+    Expected payload::
+
+        {
+            "person_id": "Alice",
+            "event_id": "1708286380-abc",   # optional but preferred
+            "camera": "backyard",            # optional, informational
+            "submitted_at": 1708286500000   # optional, ms epoch
+        }
+
+    Processing steps:
+    1. Validate payload (person_id required).
+    2. Remove the embedding(s) linked to event_id; fall back to removing the
+       most-recent embedding when event_id is absent or untracked.
+    3. Attempt to refresh the person snapshot from the next best retained
+       event_id so the dashboard image updates automatically.
+    4. Publish an ACK to ``frigate_identity/feedback/false_positive_ack``.
+    """
+    ACK_TOPIC = "frigate_identity/feedback/false_positive_ack"
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning("[FP] Invalid JSON in false-positive feedback message")
+        return
+
+    person_raw = payload.get("person_id")
+    if not isinstance(person_raw, str):
+        logger.warning("[FP] Invalid person_id in false-positive feedback payload")
+        return
+
+    person_id = person_raw.strip()
+
+    event_raw = payload.get("event_id")
+    if event_raw is None:
+        event_id = None
+    elif isinstance(event_raw, str):
+        event_id = event_raw.strip() or None
+    else:
+        _publish_fp_ack(
+            client,
+            ACK_TOPIC,
+            person_id=person_id,
+            event_id=None,
+            status="error",
+            embeddings_removed=0,
+            snapshot_refreshed=False,
+            message="Invalid event_id: expected string or null",
+        )
+        return
+
+    camera_raw = payload.get("camera")
+    camera = camera_raw if isinstance(camera_raw, str) else None
+
+    if not person_id:
+        logger.warning("[FP] Received false-positive feedback without person_id — ignoring")
+        return
+
+    logger.info(
+        "[FP] False-positive feedback received: person=%s event_id=%s camera=%s",
+        person_id,
+        event_id,
+        camera,
+    )
+
+    # ── 1. Remove embedding(s) ──────────────────────────────────────────
+    try:
+        if event_id:
+            removed = embedding_store.remove_embeddings_by_event_id(
+                person_id,
+                event_id,
+                fallback_to_latest=False,
+            )
+        else:
+            # No event_id: remove the most-recent embedding via fallback path
+            removed = embedding_store.remove_embeddings_by_event_id(
+                person_id,
+                "",
+                fallback_to_latest=True,
+            )
+
+        event_marked = False
+        if event_id:
+            event_marked = _mark_false_positive_event(person_id, event_id)
+
+        logger.info("[FP] Removed %d embedding(s) for %s", removed, person_id)
+    except Exception as exc:
+        logger.error("[FP] Error removing embeddings for %s: %s", person_id, exc)
+        removed = 0
+        _publish_fp_ack(
+            client,
+            ACK_TOPIC,
+            person_id=person_id,
+            event_id=event_id,
+            status="error",
+            embeddings_removed=0,
+            snapshot_refreshed=False,
+            message=f"Error removing embeddings for {person_id}: {exc}",
+        )
+        return
+
+    if event_id and removed == 0 and event_marked:
+        # Idempotent duplicate report for an already-marked event.
+        _publish_fp_ack(
+            client,
+            ACK_TOPIC,
+            person_id=person_id,
+            event_id=event_id,
+            status="ok",
+            embeddings_removed=0,
+            snapshot_refreshed=False,
+            message=f"Duplicate false-positive report for {person_id}/{event_id} ignored",
+        )
+        return
+
+    # ── 2. Refresh snapshot from next best embedding ─────────────────────
+    snapshot_refreshed = False
+    try:
+        next_event_id = embedding_store.get_latest_event_id(person_id)
+        if next_event_id:
+            snapshot_base64 = fetch_snapshot_from_api(
+                next_event_id,
+                crop=True,
+                display_mode=True,
+            )
+            if snapshot_base64:
+                image_bytes = base64.b64decode(snapshot_base64)
+                client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+                snapshot_metadata = {
+                    "person_id": person_id,
+                    "camera": camera or "unknown",
+                    "timestamp": int(time.time() * 1000),
+                    "source": "false_positive_refresh",
+                    "event_id": next_event_id,
+                }
+                client.publish(
+                    f"identity/snapshots/{person_id}/metadata",
+                    json.dumps(snapshot_metadata),
+                )
+                snapshot_refreshed = True
+                logger.info(
+                    "[FP] Refreshed snapshot for %s from event %s",
+                    person_id,
+                    next_event_id,
+                )
+            else:
+                logger.info(
+                    "[FP] No available snapshot for %s after false-positive removal (event_id=%s)",
+                    person_id,
+                    next_event_id,
+                )
+        else:
+            # No embeddings remain for this person — clear the retained snapshot
+            client.publish(f"identity/snapshots/{person_id}", b"", retain=True)
+            logger.info(
+                "[FP] Cleared retained snapshot for %s — no embeddings remain",
+                person_id,
+            )
+    except Exception as exc:
+        logger.warning("[FP] Could not refresh snapshot for %s: %s", person_id, exc)
+
+    _publish_false_positive_person_update(
+        client,
+        person_id=person_id,
+        event_id=event_id,
+        camera=camera,
+        embeddings_removed=removed,
+        snapshot_refreshed=snapshot_refreshed,
+    )
+
+    # ── 3. Publish ACK ────────────────────────────────────────────────────
+    message = (
+        f"False positive for {person_id} removed. "
+        f"{removed} embedding(s) removed."
+        + (" Dashboard image refreshed." if snapshot_refreshed else "")
+    )
+    _publish_fp_ack(
+        client,
+        ACK_TOPIC,
+        person_id=person_id,
+        event_id=event_id,
+        status="ok",
+        embeddings_removed=removed,
+        snapshot_refreshed=snapshot_refreshed,
+        message=message,
+    )
+
+
+def _mark_false_positive_event(person_id: str, event_id: str) -> bool:
+    """Mark in-memory event caches as false_positive when a report is received."""
+    if not person_id or not event_id:
+        return False
+
+    marked = False
+    now_ms = int(time.time() * 1000)
+
+    event_entry = recognized_person_events.get(event_id)
+    if isinstance(event_entry, dict) and event_entry.get("person_id") == person_id:
+        event_entry["false_positive"] = True
+        event_entry["false_positive_at"] = now_ms
+        marked = True
+
+    details_entry = event_details_cache.get(event_id)
+    if isinstance(details_entry, tuple) and len(details_entry) == 2:
+        cached_payload, cached_time = details_entry
+        if isinstance(cached_payload, dict):
+            cached_payload["false_positive"] = True
+            cached_payload["false_positive_at"] = now_ms
+            event_details_cache[event_id] = (cached_payload, cached_time)
+            marked = True
+
+    return marked
+
+
+def _publish_false_positive_person_update(
+    client,
+    *,
+    person_id: str,
+    event_id,
+    camera,
+    embeddings_removed: int,
+    snapshot_refreshed: bool,
+) -> None:
+    """Publish a lightweight identity update event for false-positive handling."""
+    payload = {
+        "person_id": person_id,
+        "camera": camera or "unknown",
+        "confidence": 0.0,
+        "source": "false_positive_feedback",
+        "frigate_zones": [],
+        "event_id": event_id,
+        "timestamp": int(time.time() * 1000),
+        "false_positive": True,
+        "embeddings_removed": int(embeddings_removed),
+        "snapshot_refreshed": bool(snapshot_refreshed),
+    }
+    try:
+        client.publish(f"identity/person/{person_id}", json.dumps(payload))
+    except Exception as exc:
+        logger.warning("[FP] Failed to publish person update for %s: %s", person_id, exc)
+
+
+def _publish_fp_ack(
+    client,
+    topic: str,
+    *,
+    person_id: str,
+    event_id,
+    status: str,
+    embeddings_removed: int,
+    snapshot_refreshed: bool,
+    message: str,
+) -> None:
+    """Publish a false-positive processing ACK to *topic*."""
+    ack = {
+        "person_id": person_id,
+        "event_id": event_id,
+        "status": status,
+        "embeddings_removed": embeddings_removed,
+        "snapshot_refreshed": snapshot_refreshed,
+        "message": message,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        client.publish(topic, json.dumps(ack), retain=False)
+        logger.info("[FP] Published ACK for %s: status=%s", person_id, status)
+    except Exception as exc:
+        logger.error("[FP] Failed to publish ACK for %s: %s", person_id, exc)
 
 
 def _normalize_relative_rect(rect):
@@ -1079,7 +1356,7 @@ def _store_completed_face_embedding(
         else:
             embedding = reid_model.extract_embedding(snapshot_base64)
 
-        embedding_store.store_embedding(person_id, embedding, camera, confidence)
+        embedding_store.store_embedding(person_id, embedding, camera, confidence, event_id=event_id)
         logger.info("[EMBEDDING] Stored final facial embedding for %s", person_id)
 
         debug_logger.log_facial_recognition(
@@ -1873,25 +2150,27 @@ def schedule_embedding_maintenance():
 
 
 # Track service start time for uptime calculation
-service_start_time = time.time()
+if __name__ == "__main__":
+    # Track service start time for uptime calculation
+    service_start_time = time.time()
 
-client = get_mqtt_client()
-client.on_connect = on_connect
-client.on_message = on_message
+    client = get_mqtt_client()
+    client.on_connect = on_connect
+    client.on_message = on_message
 
-if MQTT_USERNAME:
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
-# Start maintenance scheduler before entering the MQTT loop
-scheduler = schedule_embedding_maintenance()
+    # Start maintenance scheduler before entering the MQTT loop
+    scheduler = schedule_embedding_maintenance()
 
-if connect_with_retry(
-    client, MQTT_BROKER, MQTT_PORT, MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY
-):
-    client.loop_forever()
-else:
-    logger.error(
-        "Could not connect to MQTT broker after %d attempts. Exiting.",
-        MQTT_CONNECT_RETRIES,
-    )
-    raise SystemExit(1)
+    if connect_with_retry(
+        client, MQTT_BROKER, MQTT_PORT, MQTT_CONNECT_RETRIES, MQTT_CONNECT_RETRY_DELAY
+    ):
+        client.loop_forever()
+    else:
+        logger.error(
+            "Could not connect to MQTT broker after %d attempts. Exiting.",
+            MQTT_CONNECT_RETRIES,
+        )
+        raise SystemExit(1)

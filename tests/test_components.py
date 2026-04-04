@@ -113,6 +113,118 @@ class TestEmbeddingStore:
         retrieved = store2.get_embedding("person1")
         assert len(retrieved) == 256
 
+    # ── False-positive / event_id support ──────────────────────────────
+
+    def test_store_embedding_with_event_id(self, temp_db):
+        """Embedding stored with event_id should persist the event_id field."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        emb = np.random.rand(256)
+        store.store_embedding("alice", emb, "cam1", confidence=0.9, event_id="evt-001")
+
+        # Reload from disk to confirm persistence
+        store2 = EmbeddingStore(temp_db)
+        entries = store2.embeddings["alice"]
+        assert entries[0]["event_id"] == "evt-001"
+
+    def test_remove_embeddings_by_event_id_matching(self, temp_db):
+        """remove_embeddings_by_event_id should remove only the matched entry."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("alice", np.random.rand(256), "cam1", event_id="evt-bad")
+        store.store_embedding("alice", np.random.rand(256), "cam1", event_id="evt-good")
+
+        removed = store.remove_embeddings_by_event_id("alice", "evt-bad")
+        assert removed == 1
+        # Should still have the good embedding
+        assert store.person_exists("alice")
+        remaining_events = [e.get("event_id") for e in store.embeddings["alice"]]
+        assert "evt-bad" not in remaining_events
+        assert "evt-good" in remaining_events
+
+    def test_remove_embeddings_by_event_id_fallback(self, temp_db):
+        """When event_id is absent from stored entries, falls back to removing the newest."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        # Store two embeddings WITHOUT event_id
+        store.store_embedding("bob", np.random.rand(256), "cam1", confidence=0.9)
+        store.store_embedding("bob", np.random.rand(256), "cam1", confidence=0.8)
+
+        # Use a non-matching event_id → triggers fallback
+        removed = store.remove_embeddings_by_event_id(
+            "bob",
+            "evt-unknown",
+            fallback_to_latest=True,
+        )
+        assert removed == 1
+        # One embedding should remain
+        assert store.person_exists("bob")
+        assert len(store.embeddings["bob"]) == 1
+
+    def test_remove_embeddings_by_event_id_no_fallback_is_idempotent(self, temp_db):
+        """Unknown event_id should not remove unrelated embeddings when fallback is disabled."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("bob", np.random.rand(256), "cam1", event_id="evt-known")
+
+        removed = store.remove_embeddings_by_event_id(
+            "bob",
+            "evt-missing",
+            fallback_to_latest=False,
+        )
+        assert removed == 0
+        assert store.person_exists("bob")
+        assert len(store.embeddings["bob"]) == 1
+
+    def test_remove_embeddings_by_event_id_last_entry_deletes_person(self, temp_db):
+        """Removing the only embedding should delete the person key entirely."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("carol", np.random.rand(256), "cam1", event_id="evt-only")
+
+        removed = store.remove_embeddings_by_event_id("carol", "evt-only")
+        assert removed == 1
+        assert not store.person_exists("carol")
+
+    def test_remove_embeddings_by_event_id_unknown_person(self, temp_db):
+        """Removing embeddings for an unknown person should return 0 gracefully."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        removed = store.remove_embeddings_by_event_id("nobody", "evt-123")
+        assert removed == 0
+
+    def test_get_latest_event_id(self, temp_db):
+        """get_latest_event_id should return the event_id of the most recent embedding."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("dave", np.random.rand(256), "cam1", event_id="evt-old")
+        store.store_embedding("dave", np.random.rand(256), "cam1", event_id="evt-new")
+
+        # Most recent is prepended (index 0)
+        assert store.get_latest_event_id("dave") == "evt-new"
+
+    def test_get_latest_event_id_no_event_ids(self, temp_db):
+        """get_latest_event_id should return None when no event_ids are stored."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("eve", np.random.rand(256), "cam1")
+        assert store.get_latest_event_id("eve") is None
+
+    def test_get_latest_event_id_unknown_person(self, temp_db):
+        """get_latest_event_id should return None for unknown person."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        assert store.get_latest_event_id("nobody") is None
+
 
 class TestMatcher:
     """Tests for the EmbeddingMatcher module."""
