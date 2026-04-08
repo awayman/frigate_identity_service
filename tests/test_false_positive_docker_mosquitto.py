@@ -27,22 +27,24 @@ if str(SERVICE_DIR) not in sys.path:
     sys.path.insert(0, str(SERVICE_DIR))
 
 
-def _patch_heavy_imports() -> None:
+@pytest.fixture(autouse=True)
+def _patch_heavy_imports(monkeypatch) -> None:
     """Stub heavy imports so importing identity_service is side-effect safe."""
     mock_reid_module = MagicMock()
     mock_reid_module.ReIDModel = MagicMock(side_effect=RuntimeError("mocked for tests"))
-    sys.modules.setdefault("reid_model", mock_reid_module)
+    monkeypatch.setitem(sys.modules, "reid_model", mock_reid_module)
 
     mock_sched = MagicMock()
     mock_sched.schedulers = MagicMock()
     mock_sched.schedulers.background = MagicMock()
     mock_sched.schedulers.background.BackgroundScheduler = MagicMock(return_value=MagicMock())
-    sys.modules.setdefault("apscheduler", mock_sched)
-    sys.modules.setdefault("apscheduler.schedulers", mock_sched.schedulers)
-    sys.modules.setdefault("apscheduler.schedulers.background", mock_sched.schedulers.background)
-
-
-_patch_heavy_imports()
+    monkeypatch.setitem(sys.modules, "apscheduler", mock_sched)
+    monkeypatch.setitem(sys.modules, "apscheduler.schedulers", mock_sched.schedulers)
+    monkeypatch.setitem(
+        sys.modules,
+        "apscheduler.schedulers.background",
+        mock_sched.schedulers.background,
+    )
 
 
 def _new_client() -> mqtt.Client:

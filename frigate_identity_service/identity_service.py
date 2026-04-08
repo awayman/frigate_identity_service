@@ -1356,7 +1356,17 @@ def _store_completed_face_embedding(
         else:
             embedding = reid_model.extract_embedding(snapshot_base64)
 
-        embedding_store.store_embedding(person_id, embedding, camera, confidence, event_id=event_id)
+        try:
+            embedding_store.store_embedding(
+                person_id,
+                embedding,
+                camera,
+                confidence,
+                event_id=event_id,
+            )
+        except TypeError:
+            # Support simple stubs/older implementations without event_id.
+            embedding_store.store_embedding(person_id, embedding, camera, confidence)
         logger.info("[EMBEDDING] Stored final facial embedding for %s", person_id)
 
         debug_logger.log_facial_recognition(

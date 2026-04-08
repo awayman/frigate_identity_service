@@ -39,20 +39,22 @@ from PIL import Image
 # Path setup
 
 # Patch reid_model and apscheduler before importing identity_service
-def _patch_heavy():
+@pytest.fixture(autouse=True)
+def _patch_heavy(monkeypatch):
     mock_reid = MagicMock()
     mock_reid.ReIDModel = MagicMock(side_effect=RuntimeError("mocked"))
-    sys.modules.setdefault("reid_model", mock_reid)
+    monkeypatch.setitem(sys.modules, "reid_model", mock_reid)
     mock_sched = MagicMock()
     mock_sched.schedulers = MagicMock()
     mock_sched.schedulers.background = MagicMock()
     mock_sched.schedulers.background.BackgroundScheduler = MagicMock(return_value=MagicMock())
-    sys.modules.setdefault("apscheduler", mock_sched)
-    sys.modules.setdefault("apscheduler.schedulers", mock_sched.schedulers)
-    sys.modules.setdefault("apscheduler.schedulers.background", mock_sched.schedulers.background)
-
-
-_patch_heavy()
+    monkeypatch.setitem(sys.modules, "apscheduler", mock_sched)
+    monkeypatch.setitem(sys.modules, "apscheduler.schedulers", mock_sched.schedulers)
+    monkeypatch.setitem(
+        sys.modules,
+        "apscheduler.schedulers.background",
+        mock_sched.schedulers.background,
+    )
 # ---------------------------------------------------------------------------
 
 SERVICE_DIR = Path(__file__).resolve().parents[1] / "frigate_identity_service"
