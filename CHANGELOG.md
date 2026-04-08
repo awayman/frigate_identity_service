@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.7.2] - 2026-04-08
+
+### Added
+- release: add semver parsing and latest tag retrieval for version bumping
+- add snapshot JPEG quality settings and update embedding handling for false positives
+### Fixed
+- tests: prevent reid_model mock leakage across suite
+- identity_service: harden false-positive pipeline and test coverage
 ## [0.6.9] - 2026-04-03
 
 ### Changed

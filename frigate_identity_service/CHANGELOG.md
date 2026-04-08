@@ -1,3 +1,13 @@
+## 0.7.2
+
+### Added
+- release: add semver parsing and latest tag retrieval for version bumping
+- add snapshot JPEG quality settings and update embedding handling for false positives
+
+### Fixed
+- tests: prevent reid_model mock leakage across suite
+- identity_service: harden false-positive pipeline and test coverage
+
 ## 0.6.9
 
 ### Changed
