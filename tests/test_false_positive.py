@@ -147,8 +147,8 @@ class TestHandleFalsePositiveFeedback:
 
         return svc.handle_false_positive_feedback
 
-    def test_valid_payload_removes_embedding_by_event_id(self, temp_db):
-        """Valid payload with event_id results in embedding removal and ok ACK."""
+    def test_valid_payload_marks_embedding_by_event_id(self, temp_db):
+        """Valid payload with event_id marks matching embedding negative and ACKs."""
         from embedding_store import EmbeddingStore
 
         store = EmbeddingStore(temp_db)
@@ -161,11 +161,11 @@ class TestHandleFalsePositiveFeedback:
 
         handler(client, msg)
 
-        # Bad embedding gone, good one remains
+        # Bad embedding is marked negative, good one remains positive.
         assert store.person_exists("alice")
-        remaining = [e.get("event_id") for e in store.embeddings["alice"]]
-        assert "evt-fp" not in remaining
-        assert "evt-ok" in remaining
+        by_event = {e.get("event_id"): e for e in store.embeddings["alice"]}
+        assert by_event["evt-fp"].get("negative") is True
+        assert by_event["evt-ok"].get("negative") is False
 
         # ACK published with status=ok
         acks = client.get_published("frigate_identity/feedback/false_positive_ack")
@@ -176,8 +176,8 @@ class TestHandleFalsePositiveFeedback:
         assert ack["event_id"] == "evt-fp"
         assert ack["embeddings_removed"] == 1
 
-    def test_valid_payload_no_event_id_removes_most_recent(self, temp_db):
-        """Payload without event_id falls back to removing the most recent embedding."""
+    def test_valid_payload_no_event_id_marks_most_recent(self, temp_db):
+        """Payload without event_id falls back to marking most-recent positive embedding."""
         from embedding_store import EmbeddingStore
 
         store = EmbeddingStore(temp_db)
@@ -191,16 +191,18 @@ class TestHandleFalsePositiveFeedback:
 
         handler(client, msg)
 
-        # One embedding removed (most recent = evt-newer, index 0)
+        # Most recent positive embedding is marked (evt-newer), older remains positive.
         assert store.person_exists("bob")
-        assert len(store.embeddings["bob"]) == 1
+        by_event = {e.get("event_id"): e for e in store.embeddings["bob"]}
+        assert by_event["evt-newer"].get("negative") is True
+        assert by_event["evt-old"].get("negative") is False
         acks = client.get_published("frigate_identity/feedback/false_positive_ack")
         ack = json.loads(acks[0])
         assert ack["status"] == "ok"
         assert ack["embeddings_removed"] == 1
 
-    def test_last_embedding_removed_clears_person(self, temp_db):
-        """When the last embedding is removed the snapshot is cleared (empty payload)."""
+    def test_last_positive_embedding_marked_clears_snapshot(self, temp_db):
+        """When the last positive embedding is marked, retained snapshot is cleared."""
         from embedding_store import EmbeddingStore
 
         store = EmbeddingStore(temp_db)
@@ -212,7 +214,8 @@ class TestHandleFalsePositiveFeedback:
 
         handler(client, msg)
 
-        assert not store.person_exists("carol")
+        assert store.person_exists("carol")
+        assert store.embeddings["carol"][0].get("negative") is True
         # Empty retained payload published to clear dashboard snapshot
         cleared = client.get_published("identity/snapshots/carol")
         assert len(cleared) == 1
@@ -321,7 +324,7 @@ class TestHandleFalsePositiveFeedback:
         assert "Invalid event_id" in ack["message"]
 
     def test_duplicate_event_report_is_idempotent(self, temp_db):
-        """A second report for the same event must not remove unrelated embeddings."""
+        """A second report for the same event must not alter unrelated embeddings."""
         from embedding_store import EmbeddingStore
         import identity_service as svc
 
@@ -342,13 +345,15 @@ class TestHandleFalsePositiveFeedback:
         msg = MockMessage({"person_id": "alice", "event_id": "evt-bad"})
 
         handler(client, msg)
-        assert len(store.embeddings["alice"]) == 1
+        by_event = {e.get("event_id"): e for e in store.embeddings["alice"]}
+        assert by_event["evt-bad"].get("negative") is True
+        assert by_event["evt-keep"].get("negative") is False
 
         handler(client, msg)
-        # Still only one embedding; duplicate event report should be ignored.
-        assert len(store.embeddings["alice"]) == 1
-        remaining = [e.get("event_id") for e in store.embeddings["alice"]]
-        assert remaining == ["evt-keep"]
+        # Duplicate report should not flip additional entries negative.
+        by_event = {e.get("event_id"): e for e in store.embeddings["alice"]}
+        assert by_event["evt-bad"].get("negative") is True
+        assert by_event["evt-keep"].get("negative") is False
 
         acks = client.get_published("frigate_identity/feedback/false_positive_ack")
         duplicate_ack = json.loads(acks[-1])

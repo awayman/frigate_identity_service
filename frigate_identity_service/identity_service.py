@@ -193,6 +193,10 @@ SNAPSHOT_LOCAL_CROP = os.getenv("SNAPSHOT_LOCAL_CROP", "true").lower() == "true"
 PUBLISH_IDENTITY_EVENT_SNAPSHOT = (
     os.getenv("PUBLISH_IDENTITY_EVENT_SNAPSHOT", "true").lower() == "true"
 )
+SNAPSHOT_REID_JPEG_QUALITY = int(os.getenv("SNAPSHOT_REID_JPEG_QUALITY", "85"))
+SNAPSHOT_DISPLAY_JPEG_QUALITY = int(
+    os.getenv("SNAPSHOT_DISPLAY_JPEG_QUALITY", "85")
+)
 # Asymmetric padding: more vertical context (head/feet) than horizontal.
 SNAPSHOT_CROP_PADDING_X = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
 SNAPSHOT_CROP_PADDING_Y = float(os.getenv("SNAPSHOT_CROP_PADDING_Y", "0.20"))
@@ -265,6 +269,22 @@ def validate_config():
         errors.append(
             "SNAPSHOT_CROP_PADDING_Y must be between 0.0 and 1.0, "
             f"got {snapshot_crop_padding_y}"
+        )
+
+    snapshot_reid_jpeg_quality = int(os.getenv("SNAPSHOT_REID_JPEG_QUALITY", "85"))
+    if not (1 <= snapshot_reid_jpeg_quality <= 95):
+        errors.append(
+            "SNAPSHOT_REID_JPEG_QUALITY must be between 1 and 95, "
+            f"got {snapshot_reid_jpeg_quality}"
+        )
+
+    snapshot_display_jpeg_quality = int(
+        os.getenv("SNAPSHOT_DISPLAY_JPEG_QUALITY", "85")
+    )
+    if not (1 <= snapshot_display_jpeg_quality <= 95):
+        errors.append(
+            "SNAPSHOT_DISPLAY_JPEG_QUALITY must be between 1 and 95, "
+            f"got {snapshot_display_jpeg_quality}"
         )
 
     # Validate snapshot local crop toggle
@@ -389,12 +409,14 @@ def validate_config():
         MIN_PERSON_DETECTION_CONFIDENCE,
     )
     logger.info(
-        "  Snapshots: mode=%s, local_crop=%s, publish_identity_event_snapshot=%s, crop_padding_x=%.2f, crop_padding_y=%.2f",
+        "  Snapshots: mode=%s, local_crop=%s, publish_identity_event_snapshot=%s, crop_padding_x=%.2f, crop_padding_y=%.2f, reid_quality=%d, display_quality=%d",
         snapshot_fetch_mode,
         snapshot_local_crop,
         publish_identity_event_snapshot,
         snapshot_crop_padding_x,
         snapshot_crop_padding_y,
+        snapshot_reid_jpeg_quality,
+        snapshot_display_jpeg_quality,
     )
 
     # Warn if legacy MQTT display path is enabled (PUBLISH_IDENTITY_EVENT_SNAPSHOT=false)
@@ -729,8 +751,9 @@ def handle_false_positive_feedback(client, msg):
 
     Processing steps:
     1. Validate payload (person_id required).
-    2. Remove the embedding(s) linked to event_id; fall back to removing the
-       most-recent embedding when event_id is absent or untracked.
+     2. Mark the embedding(s) linked to event_id as negative so they are
+         excluded from matching; fall back to marking the most-recent positive
+         embedding when event_id is absent or untracked.
     3. Attempt to refresh the person snapshot from the next best retained
        event_id so the dashboard image updates automatically.
     4. Publish an ACK to ``frigate_identity/feedback/false_positive_ack``.
@@ -781,17 +804,17 @@ def handle_false_positive_feedback(client, msg):
         camera,
     )
 
-    # ── 1. Remove embedding(s) ──────────────────────────────────────────
+    # ── 1. Mark embedding(s) negative ────────────────────────────────────
     try:
         if event_id:
-            removed = embedding_store.remove_embeddings_by_event_id(
+            removed = embedding_store.mark_embeddings_by_event_id(
                 person_id,
                 event_id,
                 fallback_to_latest=False,
             )
         else:
-            # No event_id: remove the most-recent embedding via fallback path
-            removed = embedding_store.remove_embeddings_by_event_id(
+            # No event_id: mark the most-recent positive embedding via fallback.
+            removed = embedding_store.mark_embeddings_by_event_id(
                 person_id,
                 "",
                 fallback_to_latest=True,
@@ -801,9 +824,9 @@ def handle_false_positive_feedback(client, msg):
         if event_id:
             event_marked = _mark_false_positive_event(person_id, event_id)
 
-        logger.info("[FP] Removed %d embedding(s) for %s", removed, person_id)
+        logger.info("[FP] Marked %d embedding(s) negative for %s", removed, person_id)
     except Exception as exc:
-        logger.error("[FP] Error removing embeddings for %s: %s", person_id, exc)
+        logger.error("[FP] Error marking embeddings for %s: %s", person_id, exc)
         removed = 0
         _publish_fp_ack(
             client,
@@ -813,7 +836,7 @@ def handle_false_positive_feedback(client, msg):
             status="error",
             embeddings_removed=0,
             snapshot_refreshed=False,
-            message=f"Error removing embeddings for {person_id}: {exc}",
+            message=f"Error updating embeddings for {person_id}: {exc}",
         )
         return
 
@@ -839,6 +862,7 @@ def handle_false_positive_feedback(client, msg):
             snapshot_base64 = fetch_snapshot_from_api(
                 next_event_id,
                 crop=True,
+                quality=SNAPSHOT_DISPLAY_JPEG_QUALITY,
                 display_mode=True,
             )
             if snapshot_base64:
@@ -868,10 +892,10 @@ def handle_false_positive_feedback(client, msg):
                     next_event_id,
                 )
         else:
-            # No embeddings remain for this person — clear the retained snapshot
+            # No positive embeddings remain for this person — clear the retained snapshot
             client.publish(f"identity/snapshots/{person_id}", b"", retain=True)
             logger.info(
-                "[FP] Cleared retained snapshot for %s — no embeddings remain",
+                "[FP] Cleared retained snapshot for %s — no positive embeddings remain",
                 person_id,
             )
     except Exception as exc:
@@ -888,8 +912,8 @@ def handle_false_positive_feedback(client, msg):
 
     # ── 3. Publish ACK ────────────────────────────────────────────────────
     message = (
-        f"False positive for {person_id} removed. "
-        f"{removed} embedding(s) removed."
+        f"False positive for {person_id} recorded. "
+        f"{removed} embedding(s) marked negative/excluded from matching."
         + (" Dashboard image refreshed." if snapshot_refreshed else "")
     )
     _publish_fp_ack(
@@ -1339,6 +1363,7 @@ def _store_completed_face_embedding(
     snapshot_base64 = fetch_snapshot_from_api(
         event_id,
         crop=True,
+        quality=SNAPSHOT_REID_JPEG_QUALITY,
         event_payload=event_payload,
         _pil_out=pil_out,
     )
@@ -1420,6 +1445,7 @@ def _publish_snapshot_for_identity(
         snapshot_base64 = fetch_snapshot_from_api(
             event_id,
             crop=True,
+            quality=SNAPSHOT_DISPLAY_JPEG_QUALITY,
             event_payload=event_payload,
             display_mode=True,
         )
@@ -1675,6 +1701,7 @@ def handle_frigate_event(client, msg):
         snapshot_base64 = fetch_snapshot_from_api(
             event_id,
             crop=True,
+            quality=SNAPSHOT_REID_JPEG_QUALITY,
             event_payload=after,
             _pil_out=pil_out_b,
         )

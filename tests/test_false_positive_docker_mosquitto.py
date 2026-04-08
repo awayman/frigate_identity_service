@@ -240,8 +240,10 @@ def test_false_positive_flow_with_docker_mosquitto(docker_mosquitto, temp_db_pat
         assert duplicate_ack["embeddings_removed"] == 0
 
         remaining = store.embeddings.get("alice", [])
-        assert len(remaining) == 1
-        assert remaining[0].get("event_id") == "evt-good"
+        assert len(remaining) == 2
+        by_event = {entry.get("event_id"): entry for entry in remaining}
+        assert by_event["evt-bad"].get("negative") is True
+        assert by_event["evt-good"].get("negative") is False
     finally:
         publisher.loop_stop()
         publisher.disconnect()

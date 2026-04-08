@@ -225,6 +225,47 @@ class TestEmbeddingStore:
         store = EmbeddingStore(temp_db)
         assert store.get_latest_event_id("nobody") is None
 
+    def test_mark_embeddings_by_event_id_marks_only_target(self, temp_db):
+        """mark_embeddings_by_event_id should mark only matching event entries."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("mia", np.random.rand(256), "cam1", event_id="evt-bad")
+        store.store_embedding("mia", np.random.rand(256), "cam1", event_id="evt-good")
+
+        marked = store.mark_embeddings_by_event_id("mia", "evt-bad")
+        assert marked == 1
+
+        by_event = {e.get("event_id"): e for e in store.embeddings["mia"]}
+        assert by_event["evt-bad"].get("negative") is True
+        assert by_event["evt-good"].get("negative") is False
+
+    def test_get_all_embeddings_excludes_negative_by_default(self, temp_db):
+        """Default get_all_embeddings should exclude negative-tagged entries."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("nina", np.random.rand(256), "cam1", event_id="evt-bad")
+        store.store_embedding("nina", np.random.rand(256), "cam1", event_id="evt-good")
+        store.mark_embeddings_by_event_id("nina", "evt-bad")
+
+        filtered = store.get_all_embeddings()
+        assert len(filtered["nina"]) == 1
+
+        all_entries = store.get_all_embeddings(include_negative=True)
+        assert len(all_entries["nina"]) == 2
+
+    def test_get_latest_event_id_skips_negative(self, temp_db):
+        """Latest event id should skip entries marked as negative."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        store.store_embedding("oliver", np.random.rand(256), "cam1", event_id="evt-old")
+        store.store_embedding("oliver", np.random.rand(256), "cam1", event_id="evt-new")
+        store.mark_embeddings_by_event_id("oliver", "evt-new")
+
+        assert store.get_latest_event_id("oliver") == "evt-old"
+
 
 class TestMatcher:
     """Tests for the EmbeddingMatcher module."""

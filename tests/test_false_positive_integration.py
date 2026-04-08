@@ -5,7 +5,7 @@ stub) and exercise the full round-trip:
 
   HA publishes false-positive command
       → identity service handler processes it
-      → embedding removed from store
+      → embedding marked negative in store
       → snapshot refreshed (or cleared)
       → ACK published back
 
@@ -166,8 +166,8 @@ class TestFalsePositiveEndToEnd:
 
     # ------------------------------------------------------------------
 
-    def test_submission_removes_embedding_and_sends_ack(self, temp_db):
-        """Core flow: report false positive → embedding removed → ok ACK."""
+    def test_submission_marks_embedding_and_sends_ack(self, temp_db):
+        """Core flow: report false positive → embedding marked negative → ok ACK."""
         client, store, handler = self._setup(temp_db)
         import identity_service as svc
 
@@ -189,10 +189,11 @@ class TestFalsePositiveEndToEnd:
         Msg.payload = payload
         handler(client, Msg())
 
-        # Embedding removed
+        # Embedding marked negative
         assert store.person_exists("alice")
-        remaining = [e.get("event_id") for e in store.embeddings["alice"]]
-        assert "evt-bad" not in remaining
+        by_event = {e.get("event_id"): e for e in store.embeddings["alice"]}
+        assert by_event["evt-bad"].get("negative") is True
+        assert by_event["evt-good"].get("negative") is False
 
         # ACK published
         ack_payloads = client.get_published("frigate_identity/feedback/false_positive_ack")
@@ -209,7 +210,7 @@ class TestFalsePositiveEndToEnd:
         svc.recognized_person_events.pop("evt-bad", None)
 
     def test_duplicate_report_is_idempotent(self, temp_db):
-        """Second report for same event does not remove additional embeddings."""
+        """Second report for same event does not mark additional embeddings."""
         client, store, handler = self._setup(temp_db)
         store.store_embedding("iris", np.random.rand(256), "cam1", event_id="evt-a")
         store.store_embedding("iris", np.random.rand(256), "cam1", event_id="evt-b")
@@ -219,11 +220,14 @@ class TestFalsePositiveEndToEnd:
             payload = json.dumps({"person_id": "iris", "event_id": "evt-a"}).encode()
 
         handler(client, Msg())
-        assert len(store.embeddings["iris"]) == 1
+        by_event = {e.get("event_id"): e for e in store.embeddings["iris"]}
+        assert by_event["evt-a"].get("negative") is True
+        assert by_event["evt-b"].get("negative") is False
 
         handler(client, Msg())
-        assert len(store.embeddings["iris"]) == 1
-        assert store.embeddings["iris"][0].get("event_id") == "evt-b"
+        by_event = {e.get("event_id"): e for e in store.embeddings["iris"]}
+        assert by_event["evt-a"].get("negative") is True
+        assert by_event["evt-b"].get("negative") is False
 
     def test_snapshot_updated_after_removal(self, temp_db):
         """When a next embedding exists and fetch succeeds the snapshot is updated."""
@@ -246,8 +250,8 @@ class TestFalsePositiveEndToEnd:
         ack = json.loads(client.get_published("frigate_identity/feedback/false_positive_ack")[0])
         assert ack["snapshot_refreshed"] is True
 
-    def test_all_embeddings_removed_clears_snapshot(self, temp_db):
-        """When the last embedding is removed the retained snapshot is cleared."""
+    def test_all_positive_embeddings_marked_clears_snapshot(self, temp_db):
+        """When the last positive embedding is marked the retained snapshot is cleared."""
         client, store, handler = self._setup(temp_db, snapshot_bytes=None)
 
         store.store_embedding("carol", np.random.rand(256), "cam1", event_id="evt-only")
@@ -258,7 +262,8 @@ class TestFalsePositiveEndToEnd:
 
         handler(client, Msg())
 
-        assert not store.person_exists("carol")
+        assert store.person_exists("carol")
+        assert store.embeddings["carol"][0].get("negative") is True
         snaps = client.get_published("identity/snapshots/carol")
         assert snaps
         assert snaps[0] == b""  # cleared
@@ -320,8 +325,10 @@ class TestFalsePositiveEndToEnd:
             t.join(timeout=5)
 
         assert not errors, f"Errors in concurrent test: {errors}"
-        assert not store.person_exists("eve")
-        assert not store.person_exists("frank")
+        assert store.person_exists("eve")
+        assert store.person_exists("frank")
+        assert store.embeddings["eve"][0].get("negative") is True
+        assert store.embeddings["frank"][0].get("negative") is True
         assert len(results) == 2
 
     def test_message_schema_submitted_at_optional(self, temp_db):

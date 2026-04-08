@@ -23,6 +23,8 @@ environment:
   REID_MODEL: "osnet_x1_0"
   REID_DEVICE: "auto"
   REID_SIMILARITY_THRESHOLD: "0.75"
+  SNAPSHOT_REID_JPEG_QUALITY: "85"
+  SNAPSHOT_DISPLAY_JPEG_QUALITY: "85"
   EMBEDDINGS_DB_PATH: "/data/embeddings.json"
   DEBUG_LOGGING_ENABLED: "false"
   DEBUG_LOG_PATH: "/data/debug"
@@ -34,6 +36,8 @@ options:
   reid_model: "osnet_x1_0"
   reid_device: "auto"
   reid_similarity_threshold: 0.75
+  snapshot_reid_jpeg_quality: 85
+  snapshot_display_jpeg_quality: 85
   embeddings_db_path: "/data/embeddings.json"
   debug_logging_enabled: false
   debug_log_path: "/data/debug"

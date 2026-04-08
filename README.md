@@ -81,6 +81,8 @@ fully supported.
 | `EMBEDDING_FULL_CLEAR_TIME` | `00:00` | Daily clear time (`HH:MM` 24h) when `EMBEDDING_RETENTION_MODE=full_clear_daily` |
 | `SNAPSHOT_FETCH_MODE` | `clean_if_available` | Snapshot preference for ReID input: `clean_if_available`, `snapshot`, or `thumbnail` |
 | `SNAPSHOT_LOCAL_CROP` | `true` | When using clean snapshots, crop locally from Frigate event box metadata for tighter person crops |
+| `SNAPSHOT_REID_JPEG_QUALITY` | `85` | JPEG quality used for ReID snapshot encoding (1-95) |
+| `SNAPSHOT_DISPLAY_JPEG_QUALITY` | `85` | JPEG quality used for dashboard/display snapshot publishing (1-95) |
 | `PUBLISH_IDENTITY_EVENT_SNAPSHOT` | `false` | Publish extra API-fetched identity snapshots to `identity/snapshots/{person_id}`; keep `false` to avoid overwrite/race with Frigate MQTT snapshot stream |
 | `SNAPSHOT_CROP_PADDING_X` | `0.05` | Horizontal padding (fraction of box width) added around the detected person box |
 | `SNAPSHOT_CROP_PADDING_Y` | `0.20` | Vertical padding (fraction of box height) added around the detected person box |

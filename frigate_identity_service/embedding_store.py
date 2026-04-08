@@ -64,6 +64,7 @@ class EmbeddingStore:
                         "camera": entry.get("camera", "unknown"),
                         "timestamp": entry.get("timestamp", datetime.now().isoformat()),
                         "confidence": entry.get("confidence", 0.0),
+                        "negative": bool(entry.get("negative", False)),
                     }
                 ]
         return migrated
@@ -89,9 +90,14 @@ class EmbeddingStore:
                             "camera": emb_entry["camera"],
                             "timestamp": emb_entry["timestamp"],
                             "confidence": emb_entry["confidence"],
+                            "negative": bool(emb_entry.get("negative", False)),
                         }
                         if emb_entry.get("event_id"):
                             entry_dict["event_id"] = emb_entry["event_id"]
+                        if emb_entry.get("negative_at"):
+                            entry_dict["negative_at"] = emb_entry["negative_at"]
+                        if emb_entry.get("negative_reason"):
+                            entry_dict["negative_reason"] = emb_entry["negative_reason"]
                         serializable[person_id].append(entry_dict)
 
                 with open(self.db_path, "w") as f:
@@ -124,6 +130,7 @@ class EmbeddingStore:
             "camera": camera,
             "timestamp": datetime.now().isoformat(),
             "confidence": confidence,
+            "negative": False,
         }
         if event_id:
             new_entry["event_id"] = event_id
@@ -142,6 +149,8 @@ class EmbeddingStore:
 
     def get_all_embeddings(
         self,
+        *,
+        include_negative: bool = False,
     ) -> Dict[str, List[Tuple[Union[List, Any], str, float, str]]]:
         """Get all stored embeddings with timestamps for recency weighting.
 
@@ -155,6 +164,8 @@ class EmbeddingStore:
             for person_id, embeddings_list in self.embeddings.items():
                 result[person_id] = []
                 for emb_entry in embeddings_list:
+                    if not include_negative and emb_entry.get("negative", False):
+                        continue
                     embedding = emb_entry["embedding"]
                     if isinstance(embedding, list) and np is not None:
                         embedding = np.array(embedding)
@@ -181,7 +192,14 @@ class EmbeddingStore:
             if person_id not in self.embeddings or not self.embeddings[person_id]:
                 return None
 
-            embedding = self.embeddings[person_id][0]["embedding"]
+            embedding = None
+            for entry in self.embeddings[person_id]:
+                if entry.get("negative", False):
+                    continue
+                embedding = entry["embedding"]
+                break
+            if embedding is None:
+                return None
         if isinstance(embedding, list) and np is not None:
             embedding = np.array(embedding)
         return embedding
@@ -351,10 +369,66 @@ class EmbeddingStore:
             if not entries:
                 return None
             for entry in entries:
+                if entry.get("negative", False):
+                    continue
                 eid = entry.get("event_id")
                 if eid:
                     return eid
         return None
+
+    def mark_embeddings_by_event_id(
+        self,
+        person_id: str,
+        event_id: str,
+        *,
+        fallback_to_latest: bool = False,
+        negative_reason: str = "false_positive_feedback",
+    ) -> int:
+        """Mark embeddings as negative so matcher excludes them by default.
+
+        Returns the number of newly marked entries.
+        """
+        if not person_id:
+            return 0
+
+        if not event_id and not fallback_to_latest:
+            return 0
+
+        with self._lock:
+            entries = self.embeddings.get(person_id)
+            if not entries:
+                return 0
+
+            now_iso = datetime.now().isoformat()
+            marked_count = 0
+
+            matched_indices = [
+                idx for idx, entry in enumerate(entries) if entry.get("event_id") == event_id
+            ]
+
+            if matched_indices:
+                for idx in matched_indices:
+                    entry = entries[idx]
+                    if entry.get("negative", False):
+                        continue
+                    entry["negative"] = True
+                    entry["negative_at"] = now_iso
+                    entry["negative_reason"] = negative_reason
+                    marked_count += 1
+            elif fallback_to_latest:
+                for entry in entries:
+                    if entry.get("negative", False):
+                        continue
+                    entry["negative"] = True
+                    entry["negative_at"] = now_iso
+                    entry["negative_reason"] = negative_reason
+                    marked_count = 1
+                    break
+
+            if marked_count:
+                self._save()
+
+        return marked_count
 
     def get_stats(self) -> Dict[str, int]:
         """Return summary stats for stored embeddings."""
