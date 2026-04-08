@@ -71,6 +71,33 @@ def validate_semver(version: str) -> bool:
     return bool(re.match(r"^\d+\.\d+\.\d+$", version))
 
 
+def parse_semver(version: str) -> tuple[int, int, int]:
+    """Parse a semver string into integer parts."""
+    major, minor, patch = version.split(".")
+    return int(major), int(minor), int(patch)
+
+
+def get_latest_semver_tag() -> str | None:
+    """Return the highest semver tag (without leading 'v'), if any."""
+    tags_output = run(["git", "tag", "--list", "v*"], capture=True, check=False)
+    if not tags_output:
+        return None
+
+    versions: list[str] = []
+    for line in tags_output.splitlines():
+        tag = line.strip()
+        if not tag:
+            continue
+        version = tag[1:] if tag.startswith("v") else tag
+        if validate_semver(version):
+            versions.append(version)
+
+    if not versions:
+        return None
+
+    return max(versions, key=parse_semver)
+
+
 def get_commits_since_last_tag() -> list[str]:
     """Get commit messages since the last git tag, excluding merges and release commits."""
     try:
@@ -277,11 +304,21 @@ def main() -> None:
     args = parser.parse_args()
 
     current = get_current_version()
+    latest_tag_version = get_latest_semver_tag()
     print(f"Current version: {current}")
+    if latest_tag_version:
+        print(f"Latest tag:      {latest_tag_version}")
 
     # Determine new version
     if args.version in ("major", "minor", "patch"):
-        new_version = bump_version(current, args.version)
+        bump_base = current
+        if latest_tag_version and parse_semver(latest_tag_version) > parse_semver(current):
+            bump_base = latest_tag_version
+            print(
+                f"WARNING: config.yaml version ({current}) is behind latest tag ({latest_tag_version}); "
+                f"bumping from {bump_base}."
+            )
+        new_version = bump_version(bump_base, args.version)
     elif validate_semver(args.version):
         new_version = args.version
     else:
