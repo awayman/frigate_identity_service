@@ -22,11 +22,9 @@ import json
 import os
 import sys
 import tempfile
-import types
-import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -37,7 +35,8 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 SERVICE_DIR = Path(__file__).resolve().parents[1] / "frigate_identity_service"
 if str(SERVICE_DIR) not in sys.path:
-        sys.path.insert(0, str(SERVICE_DIR))
+    sys.path.insert(0, str(SERVICE_DIR))
+
 
 # ---------------------------------------------------------------------------
 # Patch reid_model BEFORE importing identity_service to prevent weight download
@@ -99,7 +98,9 @@ def _make_image_b64(color: str = "red") -> str:
 class MockMessage:
     """Minimal MQTT message stub."""
 
-    def __init__(self, payload: Any, topic: str = "frigate_identity/feedback/false_positive"):
+    def __init__(
+        self, payload: Any, topic: str = "frigate_identity/feedback/false_positive"
+    ):
         if isinstance(payload, (dict, list)):
             payload = json.dumps(payload).encode()
         elif isinstance(payload, str):
@@ -302,8 +303,15 @@ class TestHandleFalsePositiveFeedback:
 
         acks = client.get_published("frigate_identity/feedback/false_positive_ack")
         ack = json.loads(acks[0])
-        for field in ("person_id", "event_id", "status", "embeddings_removed",
-                       "snapshot_refreshed", "message", "timestamp"):
+        for field in (
+            "person_id",
+            "event_id",
+            "status",
+            "embeddings_removed",
+            "snapshot_refreshed",
+            "message",
+            "timestamp",
+        ):
             assert field in ack, f"ACK missing field: {field}"
 
     def test_invalid_event_id_type_returns_error_ack(self, temp_db):

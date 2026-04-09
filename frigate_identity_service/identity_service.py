@@ -194,9 +194,7 @@ PUBLISH_IDENTITY_EVENT_SNAPSHOT = (
     os.getenv("PUBLISH_IDENTITY_EVENT_SNAPSHOT", "true").lower() == "true"
 )
 SNAPSHOT_REID_JPEG_QUALITY = int(os.getenv("SNAPSHOT_REID_JPEG_QUALITY", "85"))
-SNAPSHOT_DISPLAY_JPEG_QUALITY = int(
-    os.getenv("SNAPSHOT_DISPLAY_JPEG_QUALITY", "85")
-)
+SNAPSHOT_DISPLAY_JPEG_QUALITY = int(os.getenv("SNAPSHOT_DISPLAY_JPEG_QUALITY", "85"))
 # Asymmetric padding: more vertical context (head/feet) than horizontal.
 SNAPSHOT_CROP_PADDING_X = float(os.getenv("SNAPSHOT_CROP_PADDING_X", "0.05"))
 SNAPSHOT_CROP_PADDING_Y = float(os.getenv("SNAPSHOT_CROP_PADDING_Y", "0.20"))
@@ -794,7 +792,9 @@ def handle_false_positive_feedback(client, msg):
     camera = camera_raw if isinstance(camera_raw, str) else None
 
     if not person_id:
-        logger.warning("[FP] Received false-positive feedback without person_id — ignoring")
+        logger.warning(
+            "[FP] Received false-positive feedback without person_id — ignoring"
+        )
         return
 
     logger.info(
@@ -867,7 +867,9 @@ def handle_false_positive_feedback(client, msg):
             )
             if snapshot_base64:
                 image_bytes = base64.b64decode(snapshot_base64)
-                client.publish(f"identity/snapshots/{person_id}", image_bytes, retain=True)
+                client.publish(
+                    f"identity/snapshots/{person_id}", image_bytes, retain=True
+                )
                 snapshot_metadata = {
                     "person_id": person_id,
                     "camera": camera or "unknown",
@@ -979,7 +981,9 @@ def _publish_false_positive_person_update(
     try:
         client.publish(f"identity/person/{person_id}", json.dumps(payload))
     except Exception as exc:
-        logger.warning("[FP] Failed to publish person update for %s: %s", person_id, exc)
+        logger.warning(
+            "[FP] Failed to publish person update for %s: %s", person_id, exc
+        )
 
 
 def _publish_fp_ack(
