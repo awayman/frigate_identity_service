@@ -599,6 +599,8 @@ class TestIdentityLifecycleHandlers:
             "REID_SIMILARITY_THRESHOLD": 0.75,
             "MIN_PERSON_DETECTION_CONFIDENCE": 0.80,
             "SNAPSHOT_CORRELATION_WINDOW": 2.0,
+            "SNAPSHOT_REID_JPEG_QUALITY": 85,
+            "SNAPSHOT_DISPLAY_JPEG_QUALITY": 85,
         }
         exec(code, ns)
         return ns

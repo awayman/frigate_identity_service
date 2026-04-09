@@ -312,7 +312,9 @@ def main() -> None:
     # Determine new version
     if args.version in ("major", "minor", "patch"):
         bump_base = current
-        if latest_tag_version and parse_semver(latest_tag_version) > parse_semver(current):
+        if latest_tag_version and parse_semver(latest_tag_version) > parse_semver(
+            current
+        ):
             bump_base = latest_tag_version
             print(
                 f"WARNING: config.yaml version ({current}) is behind latest tag ({latest_tag_version}); "

@@ -1,4 +1,5 @@
 """Deterministic Docker Mosquitto integration test for false-positive flow."""
+
 from __future__ import annotations
 
 import base64
@@ -37,7 +38,9 @@ def _patch_heavy_imports(monkeypatch) -> None:
     mock_sched = MagicMock()
     mock_sched.schedulers = MagicMock()
     mock_sched.schedulers.background = MagicMock()
-    mock_sched.schedulers.background.BackgroundScheduler = MagicMock(return_value=MagicMock())
+    mock_sched.schedulers.background.BackgroundScheduler = MagicMock(
+        return_value=MagicMock()
+    )
     monkeypatch.setitem(sys.modules, "apscheduler", mock_sched)
     monkeypatch.setitem(sys.modules, "apscheduler.schedulers", mock_sched.schedulers)
     monkeypatch.setitem(
@@ -185,7 +188,10 @@ def test_false_positive_flow_with_docker_mosquitto(docker_mosquitto, temp_db_pat
     publisher.loop_start()
 
     try:
-        ready = _wait_for(lambda: observer.is_connected() and service_client.is_connected(), timeout=10.0)
+        ready = _wait_for(
+            lambda: observer.is_connected() and service_client.is_connected(),
+            timeout=10.0,
+        )
         assert ready, "MQTT clients did not connect in time"
 
         cmd = {
@@ -194,7 +200,9 @@ def test_false_positive_flow_with_docker_mosquitto(docker_mosquitto, temp_db_pat
             "camera": "cam1",
             "submitted_at": int(time.time() * 1000),
         }
-        publisher.publish("frigate_identity/feedback/false_positive", json.dumps(cmd), qos=1)
+        publisher.publish(
+            "frigate_identity/feedback/false_positive", json.dumps(cmd), qos=1
+        )
 
         seen_topics: dict[str, bytes] = {}
         deadline = time.time() + 12.0
@@ -209,7 +217,9 @@ def test_false_positive_flow_with_docker_mosquitto(docker_mosquitto, temp_db_pat
         assert "identity/snapshots/alice" in seen_topics
         assert "identity/person/alice" in seen_topics
 
-        ack = json.loads(seen_topics["frigate_identity/feedback/false_positive_ack"].decode("utf-8"))
+        ack = json.loads(
+            seen_topics["frigate_identity/feedback/false_positive_ack"].decode("utf-8")
+        )
         assert ack["status"] == "ok"
         assert ack["embeddings_removed"] == 1
 
@@ -220,7 +230,9 @@ def test_false_positive_flow_with_docker_mosquitto(docker_mosquitto, temp_db_pat
         assert svc.recognized_person_events["evt-bad"].get("false_positive") is True
 
         # Duplicate report should be idempotent for explicit event_id.
-        publisher.publish("frigate_identity/feedback/false_positive", json.dumps(cmd), qos=1)
+        publisher.publish(
+            "frigate_identity/feedback/false_positive", json.dumps(cmd), qos=1
+        )
 
         duplicate_ack = None
         deadline2 = time.time() + 8.0

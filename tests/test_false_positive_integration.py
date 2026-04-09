@@ -25,11 +25,9 @@ import os
 import sys
 import tempfile
 import threading
-import time
 from pathlib import Path
-from queue import Empty, Queue
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -37,6 +35,7 @@ from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Path setup
+
 
 # Patch reid_model and apscheduler before importing identity_service
 @pytest.fixture(autouse=True)
@@ -47,7 +46,9 @@ def _patch_heavy(monkeypatch):
     mock_sched = MagicMock()
     mock_sched.schedulers = MagicMock()
     mock_sched.schedulers.background = MagicMock()
-    mock_sched.schedulers.background.BackgroundScheduler = MagicMock(return_value=MagicMock())
+    mock_sched.schedulers.background.BackgroundScheduler = MagicMock(
+        return_value=MagicMock()
+    )
     monkeypatch.setitem(sys.modules, "apscheduler", mock_sched)
     monkeypatch.setitem(sys.modules, "apscheduler.schedulers", mock_sched.schedulers)
     monkeypatch.setitem(
@@ -55,6 +56,8 @@ def _patch_heavy(monkeypatch):
         "apscheduler.schedulers.background",
         mock_sched.schedulers.background,
     )
+
+
 # ---------------------------------------------------------------------------
 
 SERVICE_DIR = Path(__file__).resolve().parents[1] / "frigate_identity_service"
@@ -124,7 +127,9 @@ class InProcessMQTTClient:
         elif payload is None:
             msg.payload = b""
         else:
-            msg.payload = payload if isinstance(payload, bytes) else str(payload).encode()
+            msg.payload = (
+                payload if isinstance(payload, bytes) else str(payload).encode()
+            )
         for cb in cbs:
             try:
                 cb(self, None, msg)
@@ -196,7 +201,9 @@ class TestFalsePositiveEndToEnd:
         assert by_event["evt-good"].get("negative") is False
 
         # ACK published
-        ack_payloads = client.get_published("frigate_identity/feedback/false_positive_ack")
+        ack_payloads = client.get_published(
+            "frigate_identity/feedback/false_positive_ack"
+        )
         assert ack_payloads
         ack = json.loads(ack_payloads[0])
         assert ack["status"] == "ok"
@@ -247,7 +254,9 @@ class TestFalsePositiveEndToEnd:
         assert snaps
         assert snaps[0] == fresh  # refreshed
 
-        ack = json.loads(client.get_published("frigate_identity/feedback/false_positive_ack")[0])
+        ack = json.loads(
+            client.get_published("frigate_identity/feedback/false_positive_ack")[0]
+        )
         assert ack["snapshot_refreshed"] is True
 
     def test_all_positive_embeddings_marked_clears_snapshot(self, temp_db):
@@ -258,7 +267,9 @@ class TestFalsePositiveEndToEnd:
 
         class Msg:
             topic = "frigate_identity/feedback/false_positive"
-            payload = json.dumps({"person_id": "carol", "event_id": "evt-only"}).encode()
+            payload = json.dumps(
+                {"person_id": "carol", "event_id": "evt-only"}
+            ).encode()
 
         handler(client, Msg())
 
@@ -307,7 +318,9 @@ class TestFalsePositiveEndToEnd:
         def _submit(person, event_id):
             class Msg:
                 topic = "frigate_identity/feedback/false_positive"
-                payload = json.dumps({"person_id": person, "event_id": event_id}).encode()
+                payload = json.dumps(
+                    {"person_id": person, "event_id": event_id}
+                ).encode()
 
             try:
                 handler(client, Msg())
@@ -338,7 +351,9 @@ class TestFalsePositiveEndToEnd:
 
         class Msg:
             topic = "frigate_identity/feedback/false_positive"
-            payload = json.dumps({"person_id": "grace"}).encode()  # no event_id or submitted_at
+            payload = json.dumps(
+                {"person_id": "grace"}
+            ).encode()  # no event_id or submitted_at
 
         handler(client, Msg())
         acks = client.get_published("frigate_identity/feedback/false_positive_ack")

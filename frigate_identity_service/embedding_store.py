@@ -403,7 +403,9 @@ class EmbeddingStore:
             marked_count = 0
 
             matched_indices = [
-                idx for idx, entry in enumerate(entries) if entry.get("event_id") == event_id
+                idx
+                for idx, entry in enumerate(entries)
+                if entry.get("event_id") == event_id
             ]
 
             if matched_indices:
