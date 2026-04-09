@@ -1,3 +1,8 @@
+## 0.7.3
+
+### Changed
+- Merge pull request #43 from awayman/copilot/fix-home-assistant-install-error
+
 ## 0.7.2
 
 ### Added
