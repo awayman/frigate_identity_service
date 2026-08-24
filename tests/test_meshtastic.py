@@ -25,6 +25,8 @@ sys.path.insert(
 from meshtastic_tracker import (
     MeshtasticTracker,
     TrackerPosition,
+    bearing_to,
+    _within_fov,
     haversine_distance,
     load_camera_zones,
     load_tracker_config,
@@ -218,6 +220,172 @@ class TestLoadCameraZones:
         p.write_text(json.dumps({"other": {}}))
         result = load_camera_zones(str(p))
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# bearing_to
+# ---------------------------------------------------------------------------
+
+
+class TestBearingTo:
+    def test_north(self):
+        b = bearing_to(40.0, -73.0, 40.01, -73.0)
+        assert b == pytest.approx(0.0, abs=1.0)
+
+    def test_south(self):
+        b = bearing_to(40.0, -73.0, 39.99, -73.0)
+        assert b == pytest.approx(180.0, abs=1.0)
+
+    def test_east(self):
+        b = bearing_to(40.0, -73.0, 40.0, -72.99)
+        assert b == pytest.approx(90.0, abs=1.0)
+
+    def test_west(self):
+        b = bearing_to(40.0, -73.0, 40.0, -73.01)
+        assert b == pytest.approx(270.0, abs=1.0)
+
+    def test_result_in_range(self):
+        b = bearing_to(40.0, -73.0, 40.01, -72.99)
+        assert 0.0 <= b < 360.0
+
+
+# ---------------------------------------------------------------------------
+# _within_fov
+# ---------------------------------------------------------------------------
+
+
+class TestWithinFov:
+    def test_directly_in_front(self):
+        # Camera faces North, tracker is due North
+        assert _within_fov(0.0, 0.0, 90) is True
+
+    def test_at_fov_edge(self):
+        # Camera faces North (0°), tracker is exactly 45° off — within 90° FOV
+        assert _within_fov(45.0, 0.0, 90) is True
+
+    def test_just_outside_fov(self):
+        # Camera faces North (0°), tracker is 46° off — outside 90° FOV
+        assert _within_fov(46.0, 0.0, 90) is False
+
+    def test_wrap_around_360(self):
+        # Camera faces North (0°/360°), tracker at 350° (10° west of north)
+        assert _within_fov(350.0, 0.0, 90) is True
+
+    def test_omnidirectional(self):
+        assert _within_fov(180.0, 0.0, 360) is True
+
+    def test_opposite_direction_excluded(self):
+        # Camera faces North (0°), tracker is due South (180°)
+        assert _within_fov(180.0, 0.0, 90) is False
+
+
+# ---------------------------------------------------------------------------
+# Direction filtering in cameras_near_position
+# ---------------------------------------------------------------------------
+
+
+_CAM_LAT = 40.0
+_CAM_LON = -73.0
+
+# ~111 m north of camera (well within 200 m radius)
+_NORTH_LAT = 40.001
+_NORTH_LON = -73.0
+
+
+class TestCamerasNearPositionDirection:
+    def _make_tracker(self, direction_degrees, fov=90, radius=200):
+        return MeshtasticTracker(
+            camera_zones={
+                "cam": {
+                    "latitude": _CAM_LAT,
+                    "longitude": _CAM_LON,
+                    "radius_meters": radius,
+                    "direction_degrees": direction_degrees,
+                    "direction_fov_degrees": fov,
+                }
+            }
+        )
+
+    def test_within_fov_included(self):
+        tracker = self._make_tracker(0)  # camera faces North
+        results = tracker.cameras_near_position(_NORTH_LAT, _NORTH_LON)
+        assert any(name == "cam" for name, _ in results)
+
+    def test_outside_fov_excluded(self):
+        tracker = self._make_tracker(180)  # camera faces South
+        results = tracker.cameras_near_position(_NORTH_LAT, _NORTH_LON)
+        assert not any(name == "cam" for name, _ in results)
+
+    def test_no_direction_is_omnidirectional(self):
+        tracker = MeshtasticTracker(
+            camera_zones={
+                "cam": {
+                    "latitude": _CAM_LAT,
+                    "longitude": _CAM_LON,
+                    "radius_meters": 200,
+                }
+            }
+        )
+        results = tracker.cameras_near_position(_NORTH_LAT, _NORTH_LON)
+        assert any(name == "cam" for name, _ in results)
+
+    def test_two_cameras_same_location_opposite_directions(self):
+        # Two cameras at the same spot, one facing North, one facing South
+        tracker = MeshtasticTracker(
+            camera_zones={
+                "cam_north": {
+                    "latitude": _CAM_LAT,
+                    "longitude": _CAM_LON,
+                    "radius_meters": 200,
+                    "direction_degrees": 0,
+                    "direction_fov_degrees": 90,
+                },
+                "cam_south": {
+                    "latitude": _CAM_LAT,
+                    "longitude": _CAM_LON,
+                    "radius_meters": 200,
+                    "direction_degrees": 180,
+                    "direction_fov_degrees": 90,
+                },
+            }
+        )
+        results = tracker.cameras_near_position(_NORTH_LAT, _NORTH_LON)
+        names = [n for n, _ in results]
+        assert "cam_north" in names
+        assert "cam_south" not in names
+
+
+# ---------------------------------------------------------------------------
+# Direction filtering in compute_tracker_score
+# ---------------------------------------------------------------------------
+
+
+class TestComputeTrackerScoreDirection:
+    def _make_tracker(self, direction_degrees, fov=90):
+        return MeshtasticTracker(
+            max_position_age_s=90.0,
+            max_gps_accuracy_m=50.0,
+            association_radius_m=200.0,
+            camera_zones={
+                "cam": {
+                    "latitude": _CAM_LAT,
+                    "longitude": _CAM_LON,
+                    "radius_meters": 200,
+                    "direction_degrees": direction_degrees,
+                    "direction_fov_degrees": fov,
+                }
+            },
+        )
+
+    def test_within_fov_nonzero_score(self):
+        tracker = self._make_tracker(0)  # faces North
+        pos = _make_position(lat=_NORTH_LAT, lon=_NORTH_LON, age_offset_seconds=5.0)
+        assert tracker.compute_tracker_score(pos, "cam") > 0.0
+
+    def test_outside_fov_zero_score(self):
+        tracker = self._make_tracker(180)  # faces South
+        pos = _make_position(lat=_NORTH_LAT, lon=_NORTH_LON, age_offset_seconds=5.0)
+        assert tracker.compute_tracker_score(pos, "cam") == 0.0
 
 
 # ---------------------------------------------------------------------------

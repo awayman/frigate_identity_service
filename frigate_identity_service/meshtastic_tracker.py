@@ -35,6 +35,35 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return _EARTH_RADIUS_M * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def bearing_to(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the initial bearing in degrees (0–360, 0=North, 90=East) from point 1 to point 2."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dlam = math.radians(lon2 - lon1)
+    x = math.sin(dlam) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlam)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def _within_fov(bearing: float, camera_direction: float, fov_degrees: float) -> bool:
+    """Return True when *bearing* falls inside the camera's field of view.
+
+    Args:
+        bearing:          Bearing from the camera to the point, 0–360°.
+        camera_direction: Direction the camera faces, 0–360° (0=North, 90=East).
+        fov_degrees:      Total horizontal field of view in degrees (e.g. 90).
+                          Values ≥ 360 always return True (omnidirectional).
+    """
+    if fov_degrees >= 360:
+        return True
+    half = fov_degrees / 2.0
+    diff = (bearing - camera_direction + 360) % 360
+    # Normalise to [-180, 180]
+    if diff > 180:
+        diff -= 360
+    return abs(diff) <= half
+
+
 # ---------------------------------------------------------------------------
 # Data classes (plain dicts wrapped in thin helpers)
 # ---------------------------------------------------------------------------
@@ -147,9 +176,23 @@ def load_camera_zones(path: str) -> Dict[str, Dict[str, Any]]:
 
         {
             "cameras": {
-                "driveway": {"latitude": 40.1231, "longitude": -73.1239, "radius_meters": 35}
+                "driveway": {
+                    "latitude": 40.1231,
+                    "longitude": -73.1239,
+                    "radius_meters": 35,
+                    "direction_degrees": 270,
+                    "direction_fov_degrees": 90
+                }
             }
         }
+
+    ``direction_degrees`` (optional) sets the compass bearing the camera faces
+    (0=North, 90=East, 180=South, 270=West).  When omitted the camera is treated
+    as omnidirectional.
+
+    ``direction_fov_degrees`` (optional, default 90) specifies the total
+    horizontal field of view in degrees.  Only used when ``direction_degrees`` is
+    present.
 
     Returns an empty dict when the file does not exist or lacks the key.
     """
@@ -475,8 +518,15 @@ class MeshtasticTracker:
             if cam_lat is None or cam_lon is None:
                 continue
             dist = haversine_distance(lat, lon, cam_lat, cam_lon)
-            if dist <= (radius + extra_radius_m):
-                results.append((cam_name, dist))
+            if dist > (radius + extra_radius_m):
+                continue
+            cam_dir = zone.get("direction_degrees")
+            if cam_dir is not None:
+                fov = zone.get("direction_fov_degrees", 90)
+                b = bearing_to(cam_lat, cam_lon, lat, lon)
+                if not _within_fov(b, cam_dir, fov):
+                    continue
+            results.append((cam_name, dist))
         results.sort(key=lambda x: x[1])
         return results
 
@@ -493,13 +543,20 @@ class MeshtasticTracker:
         if cam_lat is None or cam_lon is None:
             return []
         radius = zone.get("radius_meters", self.association_radius_m)
+        cam_dir = zone.get("direction_degrees")
+        cam_fov = zone.get("direction_fov_degrees", 90)
 
         results: List[Tuple[TrackerPosition, float]] = []
         for pos in self.get_all_valid_positions():
             extra = pos.accuracy_m or 0.0
             dist = haversine_distance(pos.latitude, pos.longitude, cam_lat, cam_lon)
-            if dist <= (radius + extra):
-                results.append((pos, dist))
+            if dist > (radius + extra):
+                continue
+            if cam_dir is not None:
+                b = bearing_to(cam_lat, cam_lon, pos.latitude, pos.longitude)
+                if not _within_fov(b, cam_dir, cam_fov):
+                    continue
+            results.append((pos, dist))
         results.sort(key=lambda x: x[1])
         return results
 
@@ -519,6 +576,7 @@ class MeshtasticTracker:
         - Proximity: how close the tracker is to the camera zone.
         - Recency: how fresh the position is.
         - Accuracy: penalise poor GPS accuracy.
+        - Direction: 0.0 when the tracker is outside the camera's field of view.
         """
         zone = self.camera_zones.get(camera_name)
         if zone is None:
@@ -530,6 +588,14 @@ class MeshtasticTracker:
 
         radius = zone.get("radius_meters", self.association_radius_m)
         dist = haversine_distance(position.latitude, position.longitude, cam_lat, cam_lon)
+
+        # Direction check: exclude tracker when it is outside the camera's FOV
+        cam_dir = zone.get("direction_degrees")
+        if cam_dir is not None:
+            fov = zone.get("direction_fov_degrees", 90)
+            b = bearing_to(cam_lat, cam_lon, position.latitude, position.longitude)
+            if not _within_fov(b, cam_dir, fov):
+                return 0.0
 
         # Proximity component: 1.0 at distance=0, 0.0 at distance=radius
         max_dist = radius + (position.accuracy_m or 0.0)
