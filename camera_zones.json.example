@@ -1,0 +1,16 @@
+{
+  "cameras": {
+    "driveway": {
+      "latitude": 40.1231,
+      "longitude": -73.1239,
+      "radius_meters": 35,
+      "direction_degrees": 270,
+      "direction_fov_degrees": 90
+    },
+    "garden": {
+      "latitude": 40.1237,
+      "longitude": -73.1232,
+      "radius_meters": 30
+    }
+  }
+}

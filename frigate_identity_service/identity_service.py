@@ -16,6 +16,7 @@ from reid_model import ReIDModel
 from matcher import EmbeddingMatcher
 from mqtt_utils import get_mqtt_client
 from debug_logger import DebugLogger
+from meshtastic_tracker import build_meshtastic_tracker_from_env, MeshtasticTracker
 from snapshot_crop import (
     build_local_crop_rect,
     crop_snapshot_bytes,
@@ -538,6 +539,8 @@ USE_CONFIDENCE_WEIGHTING = (
     os.getenv("USE_CONFIDENCE_WEIGHTING", "true").lower() == "true"
 )
 
+# Meshtastic GPS tracker integration (opt-in, disabled by default)
+
 # Initialize modules
 logger.info("Initializing embedding store...")
 embedding_store = EmbeddingStore(EMBEDDINGS_DB_PATH)
@@ -584,6 +587,9 @@ camera_person_queue = defaultdict(lambda: deque(maxlen=MAX_TRACKED_PERSONS_PER_C
 # Track recognized person identities until the tracked object finishes so we can
 # learn embeddings from Frigate's final best-frame snapshot.
 recognized_person_events = {}
+
+# Meshtastic GPS tracker integration instance (None when disabled)
+meshtastic_tracker: MeshtasticTracker | None = build_meshtastic_tracker_from_env()
 
 # Cache snapshots to avoid redundant API calls
 snapshot_cache = {}  # cache_key -> (base64_image, timestamp)
@@ -636,6 +642,11 @@ def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe("frigate_identity/feedback/false_positive")
     logger.info("Subscribed to: frigate_identity/feedback/false_positive")
 
+    # Subscribe to Meshtastic GPS tracker updates when integration is enabled
+    if meshtastic_tracker is not None:
+        client.subscribe(meshtastic_tracker.mqtt_topic)
+        logger.info("Subscribed to Meshtastic topic: %s", meshtastic_tracker.mqtt_topic)
+
     logger.info(
         "Frigate Identity Service started successfully (model=%s, device=%s, threshold=%.2f)",
         REID_MODEL,
@@ -657,11 +668,80 @@ def on_message(client, userdata, msg):
             handle_embedding_clear_control(client, msg)
         elif msg.topic == "frigate_identity/feedback/false_positive":
             handle_false_positive_feedback(client, msg)
+        elif meshtastic_tracker is not None and meshtastic_tracker.matches_topic(msg.topic):
+            handle_meshtastic_position(client, msg)
         elif "/snapshot" in msg.topic:
             handle_snapshot_for_display(client, msg)
     except Exception as e:
         logger.error("Error processing MQTT message on %s: %s", msg.topic, e)
         traceback.print_exc()
+
+
+def handle_meshtastic_position(client, msg):
+    """Process incoming Meshtastic GPS position update.
+
+    Parses the payload, validates freshness and accuracy, stores the position,
+    and publishes tracker metadata to MQTT.
+    """
+    if meshtastic_tracker is None:
+        return
+    try:
+        position = meshtastic_tracker.parse_position_message(msg.topic, msg.payload)
+        if position is None:
+            return
+
+        accepted = meshtastic_tracker.update_position(position)
+        if not accepted:
+            return
+
+        # Publish normalised position to tracker-specific topic
+        pos_payload = position.to_dict()
+        client.publish(
+            f"identity/tracker/{position.tracker_id}",
+            json.dumps(pos_payload),
+            retain=False,
+        )
+
+        # If a person_id is configured publish to the person tracker topic
+        if position.person_id:
+            client.publish(
+                f"identity/person/{position.person_id}/tracker",
+                json.dumps(pos_payload),
+                retain=False,
+            )
+
+            # Find cameras near this tracker and publish correlation metadata
+            extra_radius = position.accuracy_m or 0.0
+            nearby_cameras = meshtastic_tracker.cameras_near_position(
+                position.latitude, position.longitude, extra_radius_m=extra_radius
+            )
+            if nearby_cameras:
+                nearest_camera, dist_m = nearby_cameras[0]
+                score = meshtastic_tracker.compute_tracker_score(position, nearest_camera)
+                metadata = {
+                    "tracker_id": position.tracker_id,
+                    "person_id": position.person_id,
+                    "tracker_age_seconds": round(position.age_seconds, 1),
+                    "gps_accuracy_m": position.accuracy_m,
+                    "nearest_camera": nearest_camera,
+                    "distance_to_camera_m": round(dist_m, 1),
+                    "association_confidence": score,
+                    "used_for_identity": score > 0.0,
+                }
+                client.publish(
+                    f"identity/person/{position.person_id}/tracker/metadata",
+                    json.dumps(metadata),
+                    retain=False,
+                )
+                logger.info(
+                    "[Meshtastic] %s near %s (dist=%.1fm, score=%.3f)",
+                    position.person_id,
+                    nearest_camera,
+                    dist_m,
+                    score,
+                )
+    except Exception as exc:
+        logger.error("[Meshtastic] Error handling position update: %s", exc)
 
 
 def handle_debug_control(client, msg):
@@ -1517,6 +1597,12 @@ def publish_identity_event(
         "snapshot_url": snapshot_urls["snapshot_url"],
         "clean_snapshot_url": snapshot_urls["clean_snapshot_url"],
     }
+
+    # Attach Meshtastic tracker signal when available
+    if meshtastic_tracker is not None:
+        tracker_signal = meshtastic_tracker.tracker_signal_for_person(person_id, camera)
+        if tracker_signal:
+            identity_event["tracker"] = tracker_signal
 
     # Publish to person-specific topic
     client.publish(f"identity/person/{person_id}", json.dumps(identity_event))
