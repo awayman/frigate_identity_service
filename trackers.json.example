@@ -1,0 +1,17 @@
+{
+  "!a1b2c3d4": {
+    "person_id": "alice",
+    "display_name": "Alice",
+    "enabled": true
+  },
+  "!e5f6g7h8": {
+    "asset_id": "tractor",
+    "display_name": "Tractor",
+    "enabled": true
+  },
+  "!disabled01": {
+    "person_id": "bob",
+    "display_name": "Bob (disabled)",
+    "enabled": false
+  }
+}
