@@ -10,6 +10,7 @@ Lightweight ReID service that provides person identification continuity for Frig
 - [MQTT Topics](#mqtt-topics)
 - [Snapshot Flow](#snapshot-flow)
 - [Home Assistant Add-on](#home-assistant-add-on)
+- [Unraid Community Apps](#unraid-community-apps)
 - [Debug Logging](#debug-logging)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -321,6 +322,20 @@ The companion Home Assistant integration no longer attempts automatic Supervisor
 Configuration is written by the Supervisor to `/data/options.json` and is read automatically on startup.  All options from `config.yaml` map to the environment variables listed above (e.g. `mqtt_broker` → `MQTT_BROKER`).
 
 > **Note:** GPU acceleration is not available in Home Assistant Add-on deployments.  The ReID model runs on CPU, which is sufficient for most home use cases.  For GPU-accelerated deployments, use the standalone Docker image built with `--build-arg USE_GPU=true`.
+
+## Unraid Community Apps
+
+The service is available in the [Unraid Community Apps](https://ca.unraid.net/) catalog as a native Docker template.
+
+1. In Unraid, open the **Apps** tab and search for **FrigateIdentityService**.
+2. Click **Install** and fill in your MQTT broker IP, MQTT port, and Frigate host URL.
+3. Set the **Data Path** to a persistent appdata location (e.g. `/mnt/user/appdata/frigate-identity-service`).
+4. All advanced settings (ReID model, embedding retention, debug logging, etc.) are available under the **Advanced View** toggle.
+5. Click **Apply** to start the container.
+
+The container image (`ghcr.io/awayman/frigate-identity-service:latest`) supports both `amd64` and `aarch64`. GPU passthrough is possible by setting `REID_DEVICE=cuda`, but CPU is sufficient for most deployments.
+
+For MQTT broker connectivity, point `MQTT_BROKER` at your Unraid server's IP or the address of your existing broker. The container uses `bridge` networking, so you reference host services by IP rather than hostname.
 
 ## Debug Logging
 

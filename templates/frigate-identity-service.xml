@@ -1,0 +1,341 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>FrigateIdentityService</Name>
+  <Repository>ghcr.io/awayman/frigate-identity-service:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/awayman/frigate_identity_service/issues</Support>
+  <Project>https://github.com/awayman/frigate_identity_service</Project>
+  <Overview>
+    Person re-identification service for Frigate NVR. Maintains identity continuity for detected persons using facial recognition (primary) and ReID embeddings (fallback). Publishes identity events and per-person snapshots over MQTT for Home Assistant dashboards and automations.
+
+    Requires an existing MQTT broker and Frigate NVR instance on your local network. No GPU required — runs on CPU.
+  </Overview>
+  <Description>
+    Frigate Identity Service connects to your Frigate NVR and MQTT broker to provide persistent person identity across camera views. When Frigate recognises a face it uses that label; otherwise it extracts a re-identification (ReID) embedding and matches it against stored embeddings to maintain continuity.
+
+    **What it publishes over MQTT:**
+    - `identity/person/{person_id}` — identity events with source and confidence
+    - `identity/snapshots/{person_id}` — latest snapshot per known person (retained)
+    - `identity/vehicle/detected` — vehicle detection events
+
+    **Requirements:**
+    - Frigate NVR reachable over HTTP
+    - MQTT broker (e.g. Mosquitto) reachable from the container
+    - `/data` volume mounted for embedding persistence across restarts
+
+    **Home Assistant companion integration:** https://github.com/awayman/frigate-identity-ha
+  </Description>
+  <Category>Tools:Utilities HomeAutomation:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/awayman/frigate_identity_service/main/templates/frigate-identity-service.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/awayman/frigate_identity_service/main/frigate_identity_service/icon.png</Icon>
+
+  <!-- ── Data volume ── -->
+  <Config
+    Name="Data Path"
+    Target="/data"
+    Default="/mnt/user/appdata/frigate-identity-service"
+    Mode="rw"
+    Description="Persistent storage for embeddings and debug logs. Mount a host path so learned identities survive container restarts."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/frigate-identity-service</Config>
+
+  <!-- ── MQTT ── -->
+  <Config
+    Name="MQTT Broker"
+    Target="MQTT_BROKER"
+    Default="192.168.1.1"
+    Mode=""
+    Description="Hostname or IP address of your MQTT broker."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">192.168.1.1</Config>
+
+  <Config
+    Name="MQTT Port"
+    Target="MQTT_PORT"
+    Default="1883"
+    Mode=""
+    Description="MQTT broker port."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">1883</Config>
+
+  <Config
+    Name="MQTT Username"
+    Target="MQTT_USERNAME"
+    Default=""
+    Mode=""
+    Description="MQTT authentication username. Leave blank if your broker does not require authentication."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"></Config>
+
+  <Config
+    Name="MQTT Password"
+    Target="MQTT_PASSWORD"
+    Default=""
+    Mode=""
+    Description="MQTT authentication password. Leave blank if your broker does not require authentication."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"></Config>
+
+  <!-- ── Frigate ── -->
+  <Config
+    Name="Frigate Host"
+    Target="FRIGATE_HOST"
+    Default="http://192.168.1.1:5000"
+    Mode=""
+    Description="Full URL (with port) of your Frigate NVR HTTP API. Example: http://192.168.1.50:5000"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">http://192.168.1.1:5000</Config>
+
+  <!-- ── ReID model ── -->
+  <Config
+    Name="ReID Model"
+    Target="REID_MODEL"
+    Default="osnet_x1_0"
+    Mode=""
+    Description="Re-identification model variant. Options: osnet_x1_0 (recommended), osnet_x0_75, osnet_x0_5, osnet_x0_25, osnet_ibn_x1_0, osnet_ain_x1_0, resnet50."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">osnet_x1_0</Config>
+
+  <Config
+    Name="ReID Device"
+    Target="REID_DEVICE"
+    Default="cpu"
+    Mode=""
+    Description="Device for ReID inference. Options: auto, cpu, cuda. Use cpu unless you have configured GPU passthrough."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">cpu</Config>
+
+  <Config
+    Name="ReID Similarity Threshold"
+    Target="REID_SIMILARITY_THRESHOLD"
+    Default="0.75"
+    Mode=""
+    Description="Minimum cosine similarity score (0.0–1.0) required to match a detected person to a stored embedding. Lower values match more loosely; higher values are stricter."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">0.75</Config>
+
+  <!-- ── Embeddings ── -->
+  <Config
+    Name="Embeddings DB Path"
+    Target="EMBEDDINGS_DB_PATH"
+    Default="/data/embeddings.json"
+    Mode=""
+    Description="Path inside the container where person embeddings are stored. Should be inside the mounted /data volume."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/data/embeddings.json</Config>
+
+  <Config
+    Name="Embedding Retention Mode"
+    Target="EMBEDDING_RETENTION_MODE"
+    Default="age_prune"
+    Mode=""
+    Description="Embedding retention policy. Options: age_prune (prune embeddings older than EMBEDDING_MAX_AGE_HOURS), full_clear_daily (wipe all embeddings daily at EMBEDDING_FULL_CLEAR_TIME), manual (never auto-clear)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">age_prune</Config>
+
+  <Config
+    Name="Embedding Max Age (hours)"
+    Target="EMBEDDING_MAX_AGE_HOURS"
+    Default="48"
+    Mode=""
+    Description="Maximum age in hours before an embedding is pruned. Only used when EMBEDDING_RETENTION_MODE=age_prune."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">48</Config>
+
+  <Config
+    Name="Embedding Prune Interval (minutes)"
+    Target="EMBEDDING_PRUNE_INTERVAL_MINUTES"
+    Default="30"
+    Mode=""
+    Description="How often (in minutes) the service checks for and removes expired embeddings. Only used when EMBEDDING_RETENTION_MODE=age_prune."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">30</Config>
+
+  <Config
+    Name="Embedding Full Clear Time"
+    Target="EMBEDDING_FULL_CLEAR_TIME"
+    Default="00:00"
+    Mode=""
+    Description="Time of day (HH:MM, 24-hour) to wipe all embeddings. Only used when EMBEDDING_RETENTION_MODE=full_clear_daily."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">00:00</Config>
+
+  <!-- ── Snapshot settings ── -->
+  <Config
+    Name="Snapshot Fetch Mode"
+    Target="SNAPSHOT_FETCH_MODE"
+    Default="clean_if_available"
+    Mode=""
+    Description="How to obtain snapshots for ReID input. Options: clean_if_available (prefer Frigate clean snapshots), snapshot (always use event snapshot), thumbnail (use thumbnail only)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">clean_if_available</Config>
+
+  <Config
+    Name="Snapshot Local Crop"
+    Target="SNAPSHOT_LOCAL_CROP"
+    Default="true"
+    Mode=""
+    Description="When using clean snapshots, crop locally from Frigate event box metadata for a tighter person crop before ReID."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">true</Config>
+
+  <Config
+    Name="Publish Identity Event Snapshot"
+    Target="PUBLISH_IDENTITY_EVENT_SNAPSHOT"
+    Default="true"
+    Mode=""
+    Description="Publish API-fetched per-event snapshots to identity/snapshots/{person_id}. Set to false to use only the MQTT snapshot stream (legacy mode)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">true</Config>
+
+  <Config
+    Name="Snapshot ReID JPEG Quality"
+    Target="SNAPSHOT_REID_JPEG_QUALITY"
+    Default="85"
+    Mode=""
+    Description="JPEG quality (1–95) used when encoding snapshots for ReID input."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">85</Config>
+
+  <Config
+    Name="Snapshot Display JPEG Quality"
+    Target="SNAPSHOT_DISPLAY_JPEG_QUALITY"
+    Default="85"
+    Mode=""
+    Description="JPEG quality (1–95) used when publishing snapshots to MQTT display topics."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">85</Config>
+
+  <Config
+    Name="Snapshot Crop Padding X"
+    Target="SNAPSHOT_CROP_PADDING_X"
+    Default="0.05"
+    Mode=""
+    Description="Horizontal padding added around the detected person bounding box (fraction of box width) when cropping snapshots."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">0.05</Config>
+
+  <Config
+    Name="Snapshot Crop Padding Y"
+    Target="SNAPSHOT_CROP_PADDING_Y"
+    Default="0.20"
+    Mode=""
+    Description="Vertical padding added around the detected person bounding box (fraction of box height) when cropping snapshots."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">0.20</Config>
+
+  <Config
+    Name="Snapshot Correlation Window (seconds)"
+    Target="SNAPSHOT_CORRELATION_WINDOW"
+    Default="2.0"
+    Mode=""
+    Description="Seconds within which an MQTT snapshot is correlated to a detected person. Only relevant when PUBLISH_IDENTITY_EVENT_SNAPSHOT=false."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">2.0</Config>
+
+  <Config
+    Name="Max Tracked Persons per Camera"
+    Target="MAX_TRACKED_PERSONS_PER_CAMERA"
+    Default="3"
+    Mode=""
+    Description="Maximum number of persons tracked simultaneously per camera for MQTT snapshot correlation."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">3</Config>
+
+  <!-- ── Debug ── -->
+  <Config
+    Name="Debug Logging Enabled"
+    Target="DEBUG_LOGGING_ENABLED"
+    Default="false"
+    Mode=""
+    Description="Enable debug logging for misidentification analysis. Saves per-event snapshots and JSONL logs to DEBUG_LOG_PATH."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">false</Config>
+
+  <Config
+    Name="Debug Log Path"
+    Target="DEBUG_LOG_PATH"
+    Default="/data/debug"
+    Mode=""
+    Description="Path inside the container to store debug logs and snapshots. Should be inside the mounted /data volume."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/data/debug</Config>
+
+  <Config
+    Name="Debug Save Embeddings"
+    Target="DEBUG_SAVE_EMBEDDINGS"
+    Default="false"
+    Mode=""
+    Description="Include full embedding vectors in debug JSON output. Significantly increases debug log size; only enable when investigating embedding quality."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">false</Config>
+
+  <Config
+    Name="Debug Retention Days"
+    Target="DEBUG_RETENTION_DAYS"
+    Default="7"
+    Mode=""
+    Description="Number of days to retain debug logs before automatic deletion."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">7</Config>
+
+</Container>

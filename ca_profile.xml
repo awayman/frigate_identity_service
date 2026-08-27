@@ -1,0 +1,19 @@
+<CommunityApplications>
+  <Profile>
+    Frigate Identity Service — person re-identification for Frigate NVR.
+
+    Maintains identity continuity for detected persons using facial recognition
+    (from Frigate) as the primary source and ReID (re-identification) embeddings
+    as a fallback when faces are not visible. Publishes identity events and
+    per-person snapshots over MQTT for use in Home Assistant dashboards,
+    automations, and the companion Frigate Identity HA integration.
+
+    Supports amd64 and aarch64. Runs on CPU (no GPU required). Connects to your
+    existing MQTT broker and Frigate NVR instance over the local network.
+
+    Source: https://github.com/awayman/frigate_identity_service
+    HA Integration: https://github.com/awayman/frigate-identity-ha
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/awayman/frigate_identity_service/main/frigate_identity_service/icon.png</Icon>
+  <WebPage>https://github.com/awayman/frigate_identity_service</WebPage>
+</CommunityApplications>
