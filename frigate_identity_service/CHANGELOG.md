@@ -1,3 +1,8 @@
+## 0.7.5
+
+### Added
+- add meshtastic_tracker.py to Dockerfile for module inclusion
+
 ## 0.7.4
 
 ### Added
