@@ -32,6 +32,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def normalize_person_id(person_id):
+    """Collapse case and whitespace variations for a stored identity."""
+    if person_id is None:
+        return ""
+    return " ".join(str(person_id).strip().split()).casefold()
+
+
 # Suppress APScheduler's verbose job execution logs
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -1412,7 +1420,8 @@ def _cache_recognized_person_event(
     zones,
 ):
     """Cache recognized identity metadata until the tracked event completes."""
-    if not event_id or not person_id:
+    cleaned_person_id = " ".join(str(person_id).strip().split())
+    if not event_id or not cleaned_person_id:
         return
 
     existing = recognized_person_events.get(event_id, {})
@@ -1420,7 +1429,7 @@ def _cache_recognized_person_event(
     current_confidence = float(confidence or 0.0)
 
     recognized_person_events[event_id] = {
-        "person_id": person_id,
+        "person_id": cleaned_person_id,
         "camera": camera or existing.get("camera"),
         "confidence": max(existing_confidence, current_confidence),
         "timestamp": timestamp
@@ -1522,7 +1531,8 @@ def _publish_snapshot_for_identity(
     if not PUBLISH_IDENTITY_EVENT_SNAPSHOT:
         return
 
-    if not person_id or not event_id:
+    cleaned_person_id = " ".join(str(person_id).strip().split())
+    if not cleaned_person_id or not event_id:
         return
 
     try:
@@ -1584,6 +1594,8 @@ def publish_identity_event(
 ):
     """Publish identity event to Home Assistant"""
     snapshot_urls = build_identity_snapshot_urls(event_id)
+    cleaned_person_id = " ".join(str(person_id).strip().split())
+    person_id = cleaned_person_id or person_id
     identity_event = {
         "person_id": person_id,
         "camera": camera,

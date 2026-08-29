@@ -75,3 +75,4 @@ Thumbs.db
 test-local.ps1
 test-local.sh
 .env.local
+my-frigate-identity-service.xml

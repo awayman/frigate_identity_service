@@ -10,6 +10,19 @@ except ImportError:
     np = None
 
 
+def normalize_person_id(person_id: Optional[str]) -> str:
+    """Normalize a person identifier to collapse case/spacing variants.
+
+    The service should treat "Alice", "alice", and " Alice " as the same
+    person for both matching and storage. This avoids splitting a single real
+    individual into multiple identities when Frigate labels the same subject with
+    minor naming variations.
+    """
+    if person_id is None:
+        return ""
+    return " ".join(str(person_id).strip().split()).casefold()
+
+
 class EmbeddingStore:
     """Persistent storage for person re-identification embeddings.
 
@@ -48,17 +61,29 @@ class EmbeddingStore:
         else:
             self.embeddings = {}
 
+    @staticmethod
+    def _normalize_person_id(person_id: Optional[str]) -> str:
+        """Return a canonical identifier for a person recorded in the store."""
+        return normalize_person_id(person_id)
+
     def _migrate_to_new_format(self, data: dict) -> Dict[str, List[Dict]]:
         """Migrate old single-embedding format {person: {embedding, ...}} to
         new multi-embedding format {person: [{embedding, ...}, ...]}."""
-        migrated = {}
+        migrated: Dict[str, List[Dict]] = {}
         for person_id, entry in data.items():
+            canonical_id = self._normalize_person_id(person_id)
+            if not canonical_id:
+                continue
+
             if isinstance(entry, list):
-                # Already new format
-                migrated[person_id] = entry
+                # Already new format: merge any equivalent keys that differ only by
+                # case or whitespace during file migration.
+                migrated.setdefault(canonical_id, [])
+                migrated[canonical_id].extend(entry)
             elif isinstance(entry, dict) and "embedding" in entry:
-                # Old format: single embedding dict — wrap in a list
-                migrated[person_id] = [
+                # Old format: single embedding dict — wrap in a list.
+                migrated.setdefault(canonical_id, [])
+                migrated[canonical_id].append(
                     {
                         "embedding": entry["embedding"],
                         "camera": entry.get("camera", "unknown"),
@@ -66,7 +91,7 @@ class EmbeddingStore:
                         "confidence": entry.get("confidence", 0.0),
                         "negative": bool(entry.get("negative", False)),
                     }
-                ]
+                )
         return migrated
 
     def _save(self):
@@ -125,6 +150,10 @@ class EmbeddingStore:
             confidence: Confidence score for this detection
             event_id: Optional Frigate event ID that produced this embedding
         """
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
+            return
+
         new_entry: Dict[str, Any] = {
             "embedding": embedding,
             "camera": camera,
@@ -136,14 +165,14 @@ class EmbeddingStore:
             new_entry["event_id"] = event_id
 
         with self._lock:
-            if person_id not in self.embeddings:
-                self.embeddings[person_id] = [new_entry]
+            if normalized_person_id not in self.embeddings:
+                self.embeddings[normalized_person_id] = [new_entry]
             else:
-                self.embeddings[person_id].insert(0, new_entry)
+                self.embeddings[normalized_person_id].insert(0, new_entry)
                 # Trim to max allowed
-                self.embeddings[person_id] = self.embeddings[person_id][
-                    : self.MAX_EMBEDDINGS_PER_PERSON
-                ]
+                self.embeddings[normalized_person_id] = self.embeddings[
+                    normalized_person_id
+                ][: self.MAX_EMBEDDINGS_PER_PERSON]
 
         self._save()
 
@@ -188,12 +217,16 @@ class EmbeddingStore:
         Returns:
             Feature vector or None if not found
         """
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
+            return None
+
         with self._lock:
-            if person_id not in self.embeddings or not self.embeddings[person_id]:
+            if normalized_person_id not in self.embeddings or not self.embeddings[normalized_person_id]:
                 return None
 
             embedding = None
-            for entry in self.embeddings[person_id]:
+            for entry in self.embeddings[normalized_person_id]:
                 if entry.get("negative", False):
                     continue
                 embedding = entry["embedding"]
@@ -213,8 +246,12 @@ class EmbeddingStore:
         Returns:
             True if person exists, False otherwise
         """
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
+            return False
+
         with self._lock:
-            return person_id in self.embeddings and len(self.embeddings[person_id]) > 0
+            return normalized_person_id in self.embeddings and len(self.embeddings[normalized_person_id]) > 0
 
     def delete_person(self, person_id: str) -> bool:
         """Delete a person from the store.
@@ -225,9 +262,13 @@ class EmbeddingStore:
         Returns:
             True if deleted, False if not found
         """
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
+            return False
+
         with self._lock:
-            if person_id in self.embeddings:
-                del self.embeddings[person_id]
+            if normalized_person_id in self.embeddings:
+                del self.embeddings[normalized_person_id]
                 self._save()
                 return True
             return False
@@ -329,14 +370,15 @@ class EmbeddingStore:
         Returns:
             Number of embedding entries removed (0 if person not found).
         """
-        if not person_id:
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
             return 0
 
         if not event_id and not fallback_to_latest:
             return 0
 
         with self._lock:
-            entries = self.embeddings.get(person_id)
+            entries = self.embeddings.get(normalized_person_id)
             if not entries:
                 return 0
 
@@ -353,9 +395,9 @@ class EmbeddingStore:
                 removed_count = 0
 
             if retained:
-                self.embeddings[person_id] = retained
+                self.embeddings[normalized_person_id] = retained
             else:
-                del self.embeddings[person_id]
+                del self.embeddings[normalized_person_id]
 
             if removed_count:
                 self._save()
@@ -364,8 +406,12 @@ class EmbeddingStore:
 
     def get_latest_event_id(self, person_id: str) -> Optional[str]:
         """Return the event_id of the most recent embedding for *person_id*, or None."""
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
+            return None
+
         with self._lock:
-            entries = self.embeddings.get(person_id)
+            entries = self.embeddings.get(normalized_person_id)
             if not entries:
                 return None
             for entry in entries:
@@ -388,14 +434,15 @@ class EmbeddingStore:
 
         Returns the number of newly marked entries.
         """
-        if not person_id:
+        normalized_person_id = self._normalize_person_id(person_id)
+        if not normalized_person_id:
             return 0
 
         if not event_id and not fallback_to_latest:
             return 0
 
         with self._lock:
-            entries = self.embeddings.get(person_id)
+            entries = self.embeddings.get(normalized_person_id)
             if not entries:
                 return 0
 

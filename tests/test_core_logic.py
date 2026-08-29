@@ -44,6 +44,23 @@ class TestEmbeddingStore:
         assert retrieved is not None
         assert len(retrieved) == 256
 
+    def test_person_id_normalization_collapses_variants(self, temp_db):
+        """Case and spacing variants should resolve to the same stored identity."""
+        from embedding_store import EmbeddingStore
+
+        store = EmbeddingStore(temp_db)
+        emb1 = np.random.rand(256)
+        emb2 = np.random.rand(256)
+
+        store.store_embedding(" Alice  ", emb1, "camera1", confidence=0.95)
+        store.store_embedding("alice", emb2, "camera2", confidence=0.92)
+
+        assert len(store.get_all_person_ids()) == 1
+        assert store.person_exists("alice")
+        assert store.person_exists("Alice")
+        assert store.get_embedding("ALICE") is not None
+        assert store.get_all_person_ids()[0] in {"Alice", "alice"}
+
 
 class TestMatcher:
     """Test EmbeddingMatcher module."""
@@ -60,6 +77,21 @@ class TestMatcher:
         }
 
         matched, score = matcher.find_best_match(query, stored, threshold=0.9)
+        assert matched == "person1"
+        assert score > 0.99
+
+    def test_find_best_match_allows_high_confidence_near_match(self):
+        """A near match is still a valid identity when it is the strongest score."""
+        from matcher import EmbeddingMatcher
+
+        matcher = EmbeddingMatcher()
+        query = np.array([1.0, 0.0, 0.0])
+        stored = {
+            "person1": (np.array([1.0, 0.0, 0.0]), "camera1", 0.95),
+            "person2": (np.array([0.99, 0.01, 0.0]), "camera2", 0.95),
+        }
+
+        matched, score = matcher.find_best_match(query, stored, threshold=0.5)
         assert matched == "person1"
         assert score > 0.99
 
