@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.7.4] - 2026-08-29
+
+### Added
+- add person ID normalization to collapse case and spacing variants
+- docs: add Unraid Community Apps section to README and create XML profile for Unraid integration
+- config: add direction_degrees and direction_fov_degrees to camera zones
+- identity_service: add Meshtastic GPS tracker integration for outdoor identity correlation
+### Fixed
+- ci: use github.token fallback and grant write permissions in auto-release
+### Changed
+- Initial plan
+- Initial plan
 ## [0.7.3] - 2026-04-09
 
 ### Changed
